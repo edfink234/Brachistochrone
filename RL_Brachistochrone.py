@@ -1,3 +1,7 @@
+#Using reinforcement learning and symbolic regression to discover the 
+#non-parametric form of the Brachistochrone
+
+
 from time import time
 import numpy as np
 import matplotlib.pyplot as plt
