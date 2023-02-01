@@ -1,14 +1,16 @@
 #Using reinforcement learning and symbolic regression to discover the 
 #non-parametric form of the Brachistochrone
 
-#TODO: Modify reward function so that it gives a value that is larger for faster times and vice versa
-#TODO: Add autoscale parameter so that it will show the whole path if it trails off the page
-#TODO: Post on Math/physics stack exchange a question about finding the brachistochrone equation from arbitrary starting and ending point as well as the time it would take for a bead to travel along that path
+#TODO: Add autoscale parameter so that it will show the whole path if it trails off the page (6.)
+#TODO: Calculate time it would take for a bead to travel along the Brachistochrone path (1.)
 #https://proofwiki.org/wiki/Time_of_Travel_down_Brachistochrone
-#TODO: Make step function compute all N y-values in one step
-#TODO: Integrate the tautochrone constraint to the reward function
-#TODO: Post on math stack exchange the question about how to calculate at which x-range the tautochrone condition would hold for the brachistochrone
-#TODO: Increase learning rate if agent gets stuck
+#TODO: Make step function compute all N y-values in one step (5.)
+#TODO: Integrate the tautochrone constraint to the reward function (7.)
+#TODO: Post on math stack exchange the question about how to calculate at which x-range the tautochrone condition would hold for the brachistochrone (7.)
+#TODO: Increase learning rate if agent gets stuck (4.)
+#TODO: Check linear space, compare to log space? (3.)
+#TODO: Use recurrent network? (2.)
+#https://www.tensorflow.org/guide/keras/rnn
 
 #Modified Files
 #==============
@@ -17,11 +19,11 @@
 #if hasattr(actor.output, '__len__') and len(actor.output) > 1: -> if hasattr(actor.output, '__shape__') and len(actor.output) > 2:
 #if hasattr(critic.output, '__len__') and len(critic.output) > 1: -> if hasattr(critic.output, '__shape__') and len(critic.output) > 2:
 
-
 from time import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from scipy.optimize import fsolve
 from gym import Env
 from gym.spaces import Box
 from pysr import PySRRegressor
@@ -42,12 +44,40 @@ from rl.memory import SequentialMemory
 import warnings
 warnings.filterwarnings("ignore")
 
+def sigmoid(x):
+    return 1/(1+np.exp(x))
+
 def scale_between(unscaledNum, minAllowed, maxAllowed, Min, Max):
      return (maxAllowed - minAllowed) * (unscaledNum - Min) / (Max - Min) + minAllowed
+     
+def BrachistohronePoints(start_point, end_point):
+    x_start, y_start = start_point
+    x_end, y_end = end_point
+    x_diff, y_diff = 0 - x_start, 0 - y_start
+    x_start, x_end = x_start + x_diff, x_end + x_diff
+    y_start, y_end = y_start + y_diff, y_end + y_diff
+    
+    def func(t, C):
+        return (t-np.sin(t))/(1-np.cos(t)) + C
+    
+    root = fsolve(func, [1], args = (x_end/y_end,))
+    t = root[0]
+    a = x_end/(t-np.sin(t))
+    theta = np.linspace(0, np.pi, 1000)
+    x_points = a*(theta - np.sin(theta)) - x_diff
+    y_points = -a*(1-np.cos(theta)) - y_diff
+    
+    cut = len(x_points[x_points <= end_point[0]])
+    
+    return x_points[:cut], y_points[:cut]
 
 class BrachistohroneEnv(Env):
     def __init__(self, x_start = 0, x_end = 1, y_start = 10, y_end = 0, iterations = 10000, interactive = False, num_x_points = 50, y_min_plot = -30, y_max_plot = 15, x_min_plot = -30, x_max_plot = 15, g = 9.80665):
         
+        if y_end >= y_start:
+            raise AssertionError("end point has to be lower than start point!")
+        if x_end <= x_start:
+            x_start, x_end = x_end, x_start
         self.y_i = y_start
         self.y_f = y_end
         self.state = self.y_i
@@ -68,10 +98,11 @@ class BrachistohroneEnv(Env):
         self.best_y_coords = []
         self.best_t = np.inf
         self.fig, self.ax = plt.subplots()
-#        self.ax.set_ylim(y_min_plot, y_max_plot)
-#        self.ax.set_xlim(x_min_plot,x_max_plot)
+        x_range = np.abs(x_min_plot - x_max_plot)
+        self.ax.set_xlim(x_min_plot - 0.1*x_range, x_max_plot + 0.1*x_range)
         self.ln, = self.ax.plot([], [], animated = True)
-        plt.scatter([10**x_start, 10**x_end], [y_start, y_end])
+        plt.scatter((10**x_start, 10**x_end), (y_start, y_end))
+        plt.plot(*BrachistohronePoints((10**x_start, y_start), (10**x_end, y_end)))
         plt.show(block=False)
         plt.pause(1)
         self.x_coords = np.logspace(x_start, x_end, num_x_points)
@@ -90,11 +121,15 @@ class BrachistohroneEnv(Env):
 #        ======================================================
 #        if action < self.min_action:
 #            self.min_action = action
+#            print("\n")
 #            print(self.min_action,self.max_action)
+#            print("\n")
 #        elif action > self.max_action:
 #            self.max_action = action
+#            print("\n")
 #            print(self.min_action,self.max_action)
-        
+#            print("\n")
+            
         self.count += 1
         self.y_min = self.y_f - (self.v**2) / (2*self.g)
         self.y_max = (self.v**2) / (2*self.g) + self.prev_state
@@ -105,8 +140,12 @@ class BrachistohroneEnv(Env):
 #        then we adjust the high/low values accordingly.
 #        It's obviously not ideal though...
         
-        high = 100 if action < 100 else action
-        low = -100 if action > -100 else action
+        high = 1
+        low = 0
+        action = sigmoid(action)
+#        high = 100 if action < 100 else action
+#        low = -100 if action > -100 else action
+        
         action = scale_between(action, self.y_min, self.y_max, low, high)
         
         if self.count == len(self.x_coords)-1:
@@ -120,8 +159,8 @@ class BrachistohroneEnv(Env):
         else:
             self.state = action if not np.isnan(action) else np.median((self.y_min, self.y_max))
             
-#            self.action_space = Box(low = self.y_min, high = self.y_max)
-#            self.observation_space = Box(low = self.y_min, high = self.y_max)
+            self.action_space = Box(low = self.y_min, high = self.y_max)
+            self.observation_space = Box(low = self.y_min, high = self.y_max)
             #For debugging purposes, if an error happens here, please lmk and send me the output!
             try:
                 assert(self.y_min-0.1 <= self.state <= self.y_max+0.1)
@@ -155,6 +194,7 @@ class BrachistohroneEnv(Env):
             elif self.best_t == np.inf:
                 self.best_y_coords = self.y_coords
                 reward = 1
+#                reward = 1/self.t
                 self.best_t = self.t
                 print(self.best_t)
                 print("\nNew Best Time = ",self.best_t)
@@ -163,12 +203,15 @@ class BrachistohroneEnv(Env):
             elif self.t < self.best_t:
                 self.best_y_coords = self.y_coords
                 reward = 1
+#                reward = 1/self.t
                 self.best_t = self.t
                 print("\nNew Best Time = ",self.best_t)
                 if not self.interactive:
                     self.render()
             elif self.t >= self.best_t:
                 reward = -1
+#                reward = 1/self.t
+            
             if self.interactive:
                 self.render(1)
             self.reset()
@@ -181,6 +224,7 @@ class BrachistohroneEnv(Env):
         if len(self.x_coords) == len(self.best_y_coords):
             self.fig.canvas.restore_region(self.bg)
             self.ln.set_ydata(self.best_y_coords)
+            
             self.ax.draw_artist(self.ln)
             self.fig.canvas.blit(self.fig.bbox)
             self.fig.canvas.flush_events()
@@ -234,11 +278,11 @@ def build_critic(env):
 def build_agent(env, actor, critic, action_input):
     nb_actions = env.action_space.shape[0]
     memory = SequentialMemory(limit = 50000, window_length = 1)
-    ddpg = DDPGAgent(nb_actions, actor, critic, action_input, memory = memory)
+    ddpg = DDPGAgent(nb_actions, actor, critic, action_input, memory = memory,  target_model_update = 1e-5)
     return ddpg
 
 if __name__ == '__main__':
-    test = BrachistohroneEnv(x_end = 0, x_start = -5, num_x_points = 100, y_start = 0, y_end = -1, y_max_plot = 11, y_min_plot = -5, x_min_plot = 0, x_max_plot = 11)
+    test = BrachistohroneEnv(x_end = 1, x_start = -1, num_x_points = 10, y_start = 10, y_end = 0, y_max_plot = 11, y_min_plot = -5, x_min_plot = 0, x_max_plot = 11)
     print(test.action_space.sample())
     print(test.observation_space.sample())
     states = test.observation_space.shape
@@ -258,14 +302,14 @@ if __name__ == '__main__':
     
     X = test.x_coords
     y = np.array(test.best_y_coords)
-    plt.plot(X,y)
+    plt.plot(X,y, label = f"Time Taken = {test.best_t:.3f} seconds")
     plt.scatter((X[0], X[-1]), (y[0], y[-1]))
+    plt.legend()
     plt.savefig("RL_Brachistochrone.png",dpi=5*96)
     np.savetxt("RL_Brachistochrone.txt",np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
     best_vals = np.loadtxt("RL_Brachistochrone.txt")
     
     X = X.reshape(-1,1)
-    
     
     model = PySRRegressor(
     niterations=40,  # < Increase me for better results
