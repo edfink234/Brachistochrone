@@ -367,7 +367,7 @@ if __name__ == '__main__':
     ddpg = build_agent(test, actor, critic, action_input)
     ddpg.compile([LazyAdam(1e-5), LazyAdam(1e-5)])
     
-    adjust_model = AdjustModel(update_every = 0, lr_factor = 1, update_lr = False, reset_weights = False)
+    adjust_model = AdjustModel(update_every = 0, lr_factor = 0, update_lr = False, reset_weights = False)
     ddpg.fit(test, nb_steps = 5e4, visualize = False, callbacks=[adjust_model])
     print("Best time = ",test.best_t)
     
