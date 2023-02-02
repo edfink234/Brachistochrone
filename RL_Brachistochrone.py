@@ -1,8 +1,6 @@
 #Using reinforcement learning and symbolic regression to discover the 
 #non-parametric form of the Brachistochrone
 
-#TODO: Add autoscale parameter so that it will show the whole path if it trails off the page (6.)
-#https://proofwiki.org/wiki/Time_of_Travel_down_Brachistochrone
 #TODO: Make step function compute all N y-values in one step (5.)
 #TODO: Integrate the tautochrone constraint to the reward function (7.)
 #TODO: Post on math stack exchange the question about how to calculate at which x-range the tautochrone condition would hold for the brachistochrone (7.)
@@ -20,10 +18,11 @@ from time import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from scipy.optimize import fsolve
+from scipy.optimize import ridder, fsolve
 from gym import Env
 from gym.spaces import Box
 from pysr import PySRRegressor
+from math import isclose
 
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
@@ -88,10 +87,14 @@ def BrachistohronePoints(start_point, end_point, g = 9.80665):
     def func(t, C):
         return (t-np.sin(t))/(1-np.cos(t)) + C
     
-    root = fsolve(func, [1], args = (x_end/y_end,))
-    t = root[0]
+    t = ridder(func, disp = 0, args = (x_end/y_end,), a = 0, b = 2*np.pi)
     a = x_end/(t-np.sin(t))
-    theta = np.linspace(0, np.pi, 1000)
+    if not isclose(func(t, x_end/y_end), 0, abs_tol = 0.1):
+        root = fsolve(func, [1], args = (x_end/y_end,))
+        t = root[0]
+        a = x_end/(t-np.sin(t))
+            
+    theta = np.linspace(0, t, 1000)
     x_points = a*(theta - np.sin(theta)) - x_diff
     y_points = -a*(1-np.cos(theta)) - y_diff
     
@@ -104,10 +107,14 @@ def BrachistohronePoints(start_point, end_point, g = 9.80665):
 class BrachistohroneEnv(Env):
     def __init__(self, x_start = 0, x_end = 1, y_start = 10, y_end = 0, iterations = 10000, interactive = False, num_x_points = 50, g = 9.80665, point_dist="log", autoscale = False):
         
-        if y_end >= y_start:
+        if y_end > y_start:
             y_start, y_end = y_end, y_start
-        if x_end <= x_start:
+        if x_end < x_start:
             x_start, x_end = x_end, x_start
+        if x_start == x_end:
+            raise(AssertionError(f"x_start and x_end cannot be equal!"))
+        if y_start == y_end:
+            raise(AssertionError(f"y_start and y_end cannot be equal!"))
             
         self.y_i = y_start
         self.y_f = y_end
@@ -128,18 +135,19 @@ class BrachistohroneEnv(Env):
         self.t = 0 #total time
         self.best_y_coords = []
         self.best_t = np.inf
+        self.autoscale = autoscale
         self.fig, self.ax = plt.subplots()
-        self.ln, = self.ax.plot([], [], animated = True)
+        if not self.autoscale:
+            self.ln, = self.ax.plot([], [], animated = True)
+        else:
+            self.ln, = plt.plot([], [])
         if point_dist == "linear":
             x_points, y_points, self.optimal_time = BrachistohronePoints((x_start, y_start), (x_end, y_end))
             plt.scatter((x_start, x_end), (y_start, y_end))
-            
         else:
             x_points, y_points, self.optimal_time = BrachistohronePoints((10**x_start, y_start), (10**x_end, y_end))
             plt.scatter((10**x_start, 10**x_end), (y_start, y_end))
-            
-        
-        plt.plot(x_points, y_points, label = f"Best Time = {self.optimal_time:0.3f}")
+        plt.plot(x_points, y_points, label = f"Best Time = {self.optimal_time:0.3f} seconds")
         plt.legend()
         plt.show(block=False)
         plt.pause(1)
@@ -148,10 +156,17 @@ class BrachistohroneEnv(Env):
         else:
             self.x_coords = np.logspace(x_start, x_end, num_x_points)
         
-        self.bg = self.fig.canvas.copy_from_bbox(self.fig.bbox)
-        self.ln.set_data(self.x_coords,[0]*len(self.x_coords))
-        self.ax.draw_artist(self.ln)
-        self.fig.canvas.blit(self.fig.bbox)
+        if not self.autoscale:
+            self.ln.set_data(self.x_coords,[0]*len(self.x_coords))
+            self.bg = self.fig.canvas.copy_from_bbox(self.fig.bbox)
+            self.ax.draw_artist(self.ln)
+            self.fig.canvas.blit(self.fig.bbox)
+        else:
+            self.ln.set_data(self.x_coords,[0]*len(self.x_coords))
+            self.ax.relim()
+            self.ax.autoscale_view()
+            plt.draw()
+            
         self.interactive = interactive
         self.min_action = 0
         self.max_action = 0
@@ -176,17 +191,9 @@ class BrachistohroneEnv(Env):
         self.y_min = self.y_f - (self.v**2) / (2*self.g)
         self.y_max = (self.v**2) / (2*self.g) + self.prev_state
         
-#        Currently, I don't know what the maximum and minimum possible
-#        values for action are, so I just picked -100 to 100
-#        arbitrarily, and if for some reason this range is exceeded,
-#        then we adjust the high/low values accordingly.
-#        It's obviously not ideal though...
-        
         high = 1
         low = 0
         action = sigmoid(action)
-#        high = 100 if action < 100 else action
-#        low = -100 if action > -100 else action
         
         action = scale_between(action, self.y_min, self.y_max, low, high)
         
@@ -264,12 +271,16 @@ class BrachistohroneEnv(Env):
 
     def render(self, pause_time = 0.1):
         if len(self.x_coords) == len(self.best_y_coords):
-            self.fig.canvas.restore_region(self.bg)
             self.ln.set_ydata(self.best_y_coords)
-            
-            self.ax.draw_artist(self.ln)
-            self.fig.canvas.blit(self.fig.bbox)
-            self.fig.canvas.flush_events()
+            if not self.autoscale:
+                self.fig.canvas.restore_region(self.bg)
+                self.ax.draw_artist(self.ln)
+                self.fig.canvas.blit(self.fig.bbox)
+                self.fig.canvas.flush_events()
+            else:
+                self.ax.relim()
+                self.ax.autoscale_view()
+                plt.draw()
             plt.pause(pause_time)
         
     def reset(self):
@@ -337,8 +348,9 @@ def build_agent(env, actor, critic, action_input):
     return ddpg
 
 if __name__ == '__main__':
+    x_start, x_end, num_x_points = 10, 20, 10
 #    test = BrachistohroneEnv(x_end = 1, x_start = -1, num_x_points = 10, y_start = 10, y_end = 0)
-    test = BrachistohroneEnv(x_end = 10, x_start = 0.1, num_x_points = 100, y_start = 10, y_end = 0, point_dist = "linear")
+    test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 20, y_end = 10, point_dist = "linear", autoscale = False)
     print(test.action_space.sample())
     print(test.observation_space.sample())
     states = test.observation_space.shape
@@ -353,7 +365,7 @@ if __name__ == '__main__':
     critic.summary()
     
     ddpg = build_agent(test, actor, critic, action_input)
-    ddpg.compile([LazyAdam(1),LazyAdam(1)])
+    ddpg.compile([LazyAdam(1e-5), LazyAdam(1e-5)])
     
     adjust_model = AdjustModel(update_every = 0, lr_factor = 1, update_lr = False, reset_weights = False)
     ddpg.fit(test, nb_steps = 5e4, visualize = False, callbacks=[adjust_model])
@@ -361,10 +373,11 @@ if __name__ == '__main__':
     
     X = test.x_coords
     y = np.array(test.best_y_coords)
-    plt.plot(X,y, label = f"Time Taken = {test.best_t:.3f} seconds")
+    plt.title(f"Number of Sampled Points = {num_x_points}")
+    plt.plot(X, y, label = f"Time Taken = {test.best_t:.3f} seconds")
     plt.scatter((X[0], X[-1]), (y[0], y[-1]))
     
-    np.savetxt("RL_Brachistochrone.txt",np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
+    np.savetxt("RL_Brachistochrone.txt", np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
     best_vals = np.loadtxt("RL_Brachistochrone.txt")
     
     X = X.reshape(-1,1)
@@ -389,7 +402,8 @@ if __name__ == '__main__':
     print(model.sympy())
     model_selection = lambdify(symbols('x0'), model.sympy())
     
-    x_points = np.linspace(0.1, 10, 1000)
+#    x_points = np.linspace(10**x_start, 10**x_end, 1000)
+    x_points = np.linspace(x_start, x_end, 1000)
     plt.plot(x_points, model_selection(x_points), label = rf"f(x) = ${model.latex()}$")
     plt.legend()
     plt.savefig("RL_Brachistochrone.png",dpi=5*96)
