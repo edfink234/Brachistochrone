@@ -2,14 +2,11 @@
 #non-parametric form of the Brachistochrone
 
 #TODO: Add autoscale parameter so that it will show the whole path if it trails off the page (6.)
-#TODO: Calculate time it would take for a bead to travel along the Brachistochrone path (1.)
 #https://proofwiki.org/wiki/Time_of_Travel_down_Brachistochrone
 #TODO: Make step function compute all N y-values in one step (5.)
 #TODO: Integrate the tautochrone constraint to the reward function (7.)
 #TODO: Post on math stack exchange the question about how to calculate at which x-range the tautochrone condition would hold for the brachistochrone (7.)
-#TODO: Increase learning rate if agent gets stuck (4.)
-#TODO: Check linear space, compare to log space? (3.)
-#TODO: Use recurrent network? (2.)
+#TODO: Use recurrent network? (7.)
 #https://www.tensorflow.org/guide/keras/rnn
 
 #Modified Files
@@ -30,27 +27,58 @@ from pysr import PySRRegressor
 
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
-from tensorflow.keras import Model
+import tensorflow.keras.backend as K
+from tensorflow.keras import Model, initializers
 from keras.layers import Concatenate
 
+from tensorflow_addons.optimizers import LazyAdam
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Flatten, Activation, Input
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Dense, Flatten, Activation, Input, LSTM, SimpleRNN, Embedding, GRU
 
 from rl.agents import DQNAgent, DDPGAgent
 from rl.policy import BoltzmannQPolicy
 from rl.memory import SequentialMemory
 
+from sympy import symbols
+from sympy.utilities.lambdify import lambdify
+
 import warnings
 warnings.filterwarnings("ignore")
 
-def sigmoid(x):
-    return 1/(1+np.exp(x))
+class AdjustModel(tf.keras.callbacks.Callback):
+    def __init__(self, update_every = 0, lr_factor = 1, update_lr = False, reset_weights = False):
+        super().__init__()
+        self.curr_step = 0
+        self.update_every = abs(update_every)
+        self.lr_factor = lr_factor
+        self.update_lr = update_lr
+        self.reset_weights = reset_weights
+    def on_batch_end(self, batch, logs=[]):
+    
+        if self.update_every:
+            if K.eval(self.model.step) == self.curr_step + self.update_every:
+                if self.update_lr:
+                    self.model.actor.optimizer.learning_rate.assign(self.model.actor.optimizer.learning_rate*self.lr_factor)
+                if self.reset_weights:
+                    for l in self.model.layers:
+                        if hasattr(l,"kernel_initializer"):
+                            kernel_initializer=initializers.glorot_uniform(seed=np.random.randint(0,1000))
+                            l.kernel.assign(kernel_initializer(tf.shape(l.kernel).eval(session=tf.compat.v1.Session())))
+                        if hasattr(l,"bias_initializer"):
+                            bias_initializer = initializers.RandomNormal(stddev=0.01, seed=np.random.randint(0,1000))
+                            l.bias.assign(bias_initializer(tf.shape(l.bias).eval(session=tf.compat.v1.Session())))
+                        if hasattr(l,"recurrent_initializer"):
+                            recurrent_initializer = initializers.RandomNormal(stddev=0.01, seed=np.random.randint(0,1000))
+                            l.recurrent_kernel.assign(recurrent_initializer(tf.shape(l.recurrent_kernel).eval(session=tf.compat.v1.Session())))
+                self.curr_step = self.model.step
+
+def sigmoid(x, c = 1):
+    return 1/(1+np.exp(c*x))
 
 def scale_between(unscaledNum, minAllowed, maxAllowed, Min, Max):
      return (maxAllowed - minAllowed) * (unscaledNum - Min) / (Max - Min) + minAllowed
      
-def BrachistohronePoints(start_point, end_point):
+def BrachistohronePoints(start_point, end_point, g = 9.80665):
     x_start, y_start = start_point
     x_end, y_end = end_point
     x_diff, y_diff = 0 - x_start, 0 - y_start
@@ -69,15 +97,18 @@ def BrachistohronePoints(start_point, end_point):
     
     cut = len(x_points[x_points <= end_point[0]])
     
-    return x_points[:cut], y_points[:cut]
+    optimal_time = t * np.sqrt(a / g)
+    
+    return x_points[:cut], y_points[:cut], optimal_time
 
 class BrachistohroneEnv(Env):
-    def __init__(self, x_start = 0, x_end = 1, y_start = 10, y_end = 0, iterations = 10000, interactive = False, num_x_points = 50, y_min_plot = -30, y_max_plot = 15, x_min_plot = -30, x_max_plot = 15, g = 9.80665):
+    def __init__(self, x_start = 0, x_end = 1, y_start = 10, y_end = 0, iterations = 10000, interactive = False, num_x_points = 50, g = 9.80665, point_dist="log", autoscale = False):
         
         if y_end >= y_start:
-            raise AssertionError("end point has to be lower than start point!")
+            y_start, y_end = y_end, y_start
         if x_end <= x_start:
             x_start, x_end = x_end, x_start
+            
         self.y_i = y_start
         self.y_f = y_end
         self.state = self.y_i
@@ -98,14 +129,25 @@ class BrachistohroneEnv(Env):
         self.best_y_coords = []
         self.best_t = np.inf
         self.fig, self.ax = plt.subplots()
-        x_range = np.abs(x_min_plot - x_max_plot)
-        self.ax.set_xlim(x_min_plot - 0.1*x_range, x_max_plot + 0.1*x_range)
         self.ln, = self.ax.plot([], [], animated = True)
-        plt.scatter((10**x_start, 10**x_end), (y_start, y_end))
-        plt.plot(*BrachistohronePoints((10**x_start, y_start), (10**x_end, y_end)))
+        if point_dist == "linear":
+            x_points, y_points, self.optimal_time = BrachistohronePoints((x_start, y_start), (x_end, y_end))
+            plt.scatter((x_start, x_end), (y_start, y_end))
+            
+        else:
+            x_points, y_points, self.optimal_time = BrachistohronePoints((10**x_start, y_start), (10**x_end, y_end))
+            plt.scatter((10**x_start, 10**x_end), (y_start, y_end))
+            
+        
+        plt.plot(x_points, y_points, label = f"Best Time = {self.optimal_time:0.3f}")
+        plt.legend()
         plt.show(block=False)
         plt.pause(1)
-        self.x_coords = np.logspace(x_start, x_end, num_x_points)
+        if point_dist == "linear":
+            self.x_coords = np.linspace(x_start, x_end, num_x_points)
+        else:
+            self.x_coords = np.logspace(x_start, x_end, num_x_points)
+        
         self.bg = self.fig.canvas.copy_from_bbox(self.fig.bbox)
         self.ln.set_data(self.x_coords,[0]*len(self.x_coords))
         self.ax.draw_artist(self.ln)
@@ -194,23 +236,23 @@ class BrachistohroneEnv(Env):
             elif self.best_t == np.inf:
                 self.best_y_coords = self.y_coords
                 reward = 1
-#                reward = 1/self.t
+                reward = 1/self.t
                 self.best_t = self.t
                 print(self.best_t)
-                print("\nNew Best Time = ",self.best_t)
+                print(f"\nNew Best Time = {self.best_t}, \t Optimal Time = {self.optimal_time}")
                 if not self.interactive:
                     self.render()
             elif self.t < self.best_t:
                 self.best_y_coords = self.y_coords
                 reward = 1
-#                reward = 1/self.t
+                reward = 1/self.t
                 self.best_t = self.t
-                print("\nNew Best Time = ",self.best_t)
+                print(f"\nNew Best Time = {self.best_t}, \t Optimal Time = {self.optimal_time}")
                 if not self.interactive:
                     self.render()
             elif self.t >= self.best_t:
                 reward = -1
-#                reward = 1/self.t
+                reward = 1/self.t
             
             if self.interactive:
                 self.render(1)
@@ -249,8 +291,10 @@ class BrachistohroneEnv(Env):
 #https://github.com/tensorneko/keras-rl2/pull/18
 #https://keras-rl.readthedocs.io/en/latest/agents/ddpg/
 def build_actor(env):
+    
     nb_actions = env.action_space.shape[0]
     actor = Sequential()
+
     actor.add(Flatten(input_shape=(1,) + env.observation_space.shape))
     actor.add(Dense(16))
     actor.add(Activation('relu'))
@@ -260,6 +304,17 @@ def build_actor(env):
     actor.add(Activation('relu'))
     actor.add(Dense(nb_actions))
     actor.add(Activation('linear'))
+    
+#    actor.add(Embedding(input_dim=100, output_dim=10))
+##     The output of GRU will be a 3D tensor of shape (batch_size, timesteps, 256)
+#    actor.add(LSTM(10, return_sequences=True))
+#
+##     The output of SimpleRNN will be a 2D tensor of shape (batch_size, 128)
+#    actor.add(SimpleRNN(10))
+#
+#    actor.add(Dense(nb_actions))
+#    actor.add(Activation('linear'))
+    
     return actor
 
 def build_critic(env):
@@ -278,11 +333,12 @@ def build_critic(env):
 def build_agent(env, actor, critic, action_input):
     nb_actions = env.action_space.shape[0]
     memory = SequentialMemory(limit = 50000, window_length = 1)
-    ddpg = DDPGAgent(nb_actions, actor, critic, action_input, memory = memory,  target_model_update = 1e-5)
+    ddpg = DDPGAgent(nb_actions, actor, critic, action_input, memory = memory, batch_size = 32)
     return ddpg
 
 if __name__ == '__main__':
-    test = BrachistohroneEnv(x_end = 1, x_start = -1, num_x_points = 10, y_start = 10, y_end = 0, y_max_plot = 11, y_min_plot = -5, x_min_plot = 0, x_max_plot = 11)
+#    test = BrachistohroneEnv(x_end = 1, x_start = -1, num_x_points = 10, y_start = 10, y_end = 0)
+    test = BrachistohroneEnv(x_end = 10, x_start = 0.1, num_x_points = 100, y_start = 10, y_end = 0, point_dist = "linear")
     print(test.action_space.sample())
     print(test.observation_space.sample())
     states = test.observation_space.shape
@@ -291,21 +347,23 @@ if __name__ == '__main__':
     print(test.action_space.high,test.action_space.low)
     actor = build_actor(test)
     actor.summary()
+#    for layer in actor.layers:
+#        print(actor.input_shape)
     critic, action_input = build_critic(test)
     critic.summary()
     
     ddpg = build_agent(test, actor, critic, action_input)
-    ddpg.compile(["adam", "adam"])
-
-    ddpg.fit(test, nb_steps = 50000, visualize = False)
+    ddpg.compile([LazyAdam(1),LazyAdam(1)])
+    
+    adjust_model = AdjustModel(update_every = 0, lr_factor = 1, update_lr = False, reset_weights = False)
+    ddpg.fit(test, nb_steps = 5e4, visualize = False, callbacks=[adjust_model])
     print("Best time = ",test.best_t)
     
     X = test.x_coords
     y = np.array(test.best_y_coords)
     plt.plot(X,y, label = f"Time Taken = {test.best_t:.3f} seconds")
     plt.scatter((X[0], X[-1]), (y[0], y[-1]))
-    plt.legend()
-    plt.savefig("RL_Brachistochrone.png",dpi=5*96)
+    
     np.savetxt("RL_Brachistochrone.txt",np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
     best_vals = np.loadtxt("RL_Brachistochrone.txt")
     
@@ -327,6 +385,12 @@ if __name__ == '__main__':
     # ^ Custom loss function (julia syntax)
     )
     model.fit(X, y)
-    print(model)
-        
+    print(model.latex())
+    print(model.sympy())
+    model_selection = lambdify(symbols('x0'), model.sympy())
+    
+    x_points = np.linspace(0.1, 10, 1000)
+    plt.plot(x_points, model_selection(x_points), label = rf"f(x) = ${model.latex()}$")
+    plt.legend()
+    plt.savefig("RL_Brachistochrone.png",dpi=5*96)
         
