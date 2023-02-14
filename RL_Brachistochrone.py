@@ -1,11 +1,11 @@
-#Using reinforcement learning and symbolic regression to discover the 
-#non-parametric form of the Brachistochrone
+'''
+****************************************************************************
+*     Reinforcement-Learning: Discovering the Brachistochrone Equation     *
+****************************************************************************
 
-#TODO: Make step function compute all N y-values in one step (5.)
-#TODO: Integrate the tautochrone constraint to the reward function (7.)
-#TODO: Post on math stack exchange the question about how to calculate at which x-range the tautochrone condition would hold for the brachistochrone (7.)
-#TODO: Use recurrent network? (7.)
-#https://www.tensorflow.org/guide/keras/rnn
+Using reinforcement learning and symbolic regression to discover the
+non-parametric form of the Brachistochrone
+'''
 
 #Modified Files
 #==============
@@ -32,18 +32,37 @@ from keras.layers import Concatenate
 
 from tensorflow_addons.optimizers import LazyAdam
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Flatten, Activation, Input, LSTM, SimpleRNN, Embedding, GRU
+from tensorflow.keras.layers import Dense, Flatten, Activation, Input
 
-from rl.agents import DQNAgent, DDPGAgent
+from rl.agents import DDPGAgent
 from rl.policy import BoltzmannQPolicy
 from rl.memory import SequentialMemory
 
 from sympy import symbols
 from sympy.utilities.lambdify import lambdify
 
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 
+'''
++++++++++++++++++++++++
++     AdjustModel     +
++++++++++++++++++++++++
+
+Class to update the learning rate and/or reset the weights of the agent.
+
+Parameters
+==========
+
+ - update_every: Number of iterations before updating the learning_rate and/or reset the weights and biases
+ 
+ - lr_factor: Factor to multiply the learning rate by every 'update_every' iterations
+ 
+ - update_lr: Whether or not to update the learning rate every 'update_every' iterations
+ 
+ - reset_weights: Whether or not to reset the weights and biases every 'update_every' iterations
+'''
 class AdjustModel(tf.keras.callbacks.Callback):
     def __init__(self, update_every = 0, lr_factor = 1, update_lr = False, reset_weights = False):
         super().__init__()
@@ -71,12 +90,37 @@ class AdjustModel(tf.keras.callbacks.Callback):
                             l.recurrent_kernel.assign(recurrent_initializer(tf.shape(l.recurrent_kernel).eval(session=tf.compat.v1.Session())))
                 self.curr_step = self.model.step
 
+'''
+sigmoid
+=======
+The sigmoid activation function; takes in a value from -infinity to +infinity and returns a value b/t 0 and 1
+'''
 def sigmoid(x, c = 1):
     return 1/(1+np.exp(c*x))
 
+'''
+scale_between
+=============
+Scales a number unscaledNum that originally lies between Min and Max to lie between minAllowed
+and maxAllowed
+'''
 def scale_between(unscaledNum, minAllowed, maxAllowed, Min, Max):
      return (maxAllowed - minAllowed) * (unscaledNum - Min) / (Max - Min) + minAllowed
      
+'''
+BrachistohronePoints
+====================
+Function to generate the coordinate of the Brachistochrone curve from
+start_point to end_point with gravitational acceleration g
+
+Parameters
+----------
+ - start_point: list of starting x coordinate and y coordinate
+ 
+ - end_point: list of end x coordinate and y coordinate
+ 
+ - g: gravitational acceleration
+'''
 def BrachistohronePoints(start_point, end_point, g = 9.80665):
     x_start, y_start = start_point
     x_end, y_end = end_point
@@ -104,8 +148,60 @@ def BrachistohronePoints(start_point, end_point, g = 9.80665):
     
     return x_points[:cut], y_points[:cut], optimal_time
 
+'''
++++++++++++++++++++++++++++++
++     BrachistohroneEnv     +
++++++++++++++++++++++++++++++
+
+Reinforcement-Learning Envrionment to discover the optimal path
+to get from (x_start, y_start) to (x_end, y_end) via only the
+acceleration of gravity g. Inherits from gym.Env. Coordinates are swapped
+automatically if one enters x_start > x_end or y_end > y_start. An error will
+be raised if one enters x_start = x_end and/or y_start = y_end
+
+Parameters
+==========
+
+ - x_start: if point_dist = "linear", then it's the starting x-coordinate
+            if point_dist = "log", then it's the starting x-coordinate raised to the power of 10
+            -> e.g. x_start = 0 means starting x coordinate is 10^0 = 1
+            
+ - x_end: if point_dist = "linear", then it's the ending x-coordinate
+          if point_dist = "log", then it's the ending x-coordinate raised to the power of 10
+          -> e.g. x_end = 1 means ending x coordinate is 10^1 = 10
+
+ - y_start: starting y-coordinate
+            
+ - y_end: ending y-coordinate
+ 
+ - iterations: Number of iterations to train the agent. NOTE: The number of iterations to construct a full path is equal to num_x_points
+ 
+ - interactive: Determines whether to display the graph where the mouse doesn't buffer, 'interactive = True', or to display the graph but have the mouse buffer, 'interactive = False'.
+                * interactive = True: Will result in longer training times, but will allow the user to hover over the real-time display of the plot and see the coordinates display
+                * interactive = False: Will result in shorter training times, but will the user will not be able to see the coordinates when hovering over the live plot with the mouse
+
+ - num_x_points: Number of points the agent will use to construct a path from (x_start, y_start) to (x_end, y_end) via only the acceleration of gravity g.
+
+ - g: acceleration of gravity in meters per second squared (m/s^2)
+ 
+ - point_dist: whether to use a linear space "linear" (np.linspace), or a logarithmic space "log" (np.logspace) for the x-coordinates.
+               * point_dist = "linear": The starting and ending x-coordinates will be x_start and x_end
+               * point_dist = "log": The starting and ending x-coordinates will be 10^x_start and 10^x_end
+
+ - autoscale: whether to scale the graph if the plot trails off the page True, or to keep the x and y limits as originally determined False
+              * auto_scale = True: Every time the plot updates, the entire canvas will be redrawn. In principle slower than auto_scale = False, but the effect in this example is not noticeable (at least to me)
+              * auto_scale = False: Only the points that change are redrawn on every update; the axes do not get updated after the initial configuration. This is done using blitting, see: https://matplotlib.org/stable/tutorials/advanced/blitting.html
+
+ - activation: Choice of activation function for the continuous action of the agent, either sigmoid "sigmoid" or tanh "tanh"
+               * activation = "tanh": Will use the tanh activation function to condense the action from -infinity to infinity -> -1 to 1. The output is then internally fed into scale_between which scales the action between the minimum and maximum y-value allowed by classical mechanics
+                   
+                * activation = "sigmoid": Will use the sigmoid activation function to condense the action from -infinity to infinity -> 0 to 1. The output is then internally fed into scale_between which scales the action between the minimum and maximum y-value allowed by classical mechanics.
+
+- activation_factor: Argument for activation function, where the activation function, A(x), is calculated as A((x_end-x_start)*activation_factor*x) for point_dist = "linear" and A((10^{x_end}-10^{x_start})*activation_factor*x) for point_dist = "log"
+'''
+
 class BrachistohroneEnv(Env):
-    def __init__(self, x_start = 0, x_end = 1, y_start = 10, y_end = 0, iterations = 10000, interactive = False, num_x_points = 50, g = 9.80665, point_dist="log", autoscale = False):
+    def __init__(self, x_start = 0, x_end = 1, y_start = 10, y_end = 0, iterations = 10000, interactive = False, num_x_points = 50, g = 9.80665, point_dist="log", autoscale = False, activation = "tanh", activation_factor = 0.6):
         
         if y_end > y_start:
             y_start, y_end = y_end, y_start
@@ -143,10 +239,15 @@ class BrachistohroneEnv(Env):
             self.ln, = plt.plot([], [])
         if point_dist == "linear":
             x_points, y_points, self.optimal_time = BrachistohronePoints((x_start, y_start), (x_end, y_end))
+            self.disp = x_end - x_start
             plt.scatter((x_start, x_end), (y_start, y_end))
         else:
             x_points, y_points, self.optimal_time = BrachistohronePoints((10**x_start, y_start), (10**x_end, y_end))
+            self.disp = 10**x_end - 10**x_start
             plt.scatter((10**x_start, 10**x_end), (y_start, y_end))
+        self.activation = activation
+        self.activation_factor = activation_factor
+        self.iterations_since_new_best = 0
         plt.plot(x_points, y_points, label = f"Best Time = {self.optimal_time:0.3f} seconds")
         plt.legend()
         plt.show(block=False)
@@ -173,27 +274,18 @@ class BrachistohroneEnv(Env):
         
     def step(self, action):
         action = action[0]
-        
-#        Trying to figure out in what range the actions like...
-#        ======================================================
-#        if action < self.min_action:
-#            self.min_action = action
-#            print("\n")
-#            print(self.min_action,self.max_action)
-#            print("\n")
-#        elif action > self.max_action:
-#            self.max_action = action
-#            print("\n")
-#            print(self.min_action,self.max_action)
-#            print("\n")
-            
         self.count += 1
         self.y_min = self.y_f - (self.v**2) / (2*self.g)
         self.y_max = (self.v**2) / (2*self.g) + self.prev_state
         
-        high = 1
-        low = 0
-        action = sigmoid(action)
+        if self.activation == "sigmoid":
+            high = 1
+            low = 0
+            action = sigmoid(action*(self.disp*self.activation_factor))
+        else: #tanh
+            high = 1
+            low = -1
+            action = np.tanh(action*(self.disp*self.activation_factor))
         
         action = scale_between(action, self.y_min, self.y_max, low, high)
         
@@ -221,29 +313,38 @@ class BrachistohroneEnv(Env):
         theta = np.arctan(opp/adj)
         
         d = np.sqrt(opp**2 + adj**2)
-#        print(opp/adj, np.sin(opp/adj))
         if self.state > self.prev_state:
             v_f = np.sqrt(np.abs(self.v**2 - 2*self.g*d*np.sin(theta)))
-            self.t += abs(v_f - self.v)/(self.g*np.sin(theta))
-            self.v = v_f
         else:
             v_f = np.sqrt(np.abs(self.v**2 + 2*self.g*d*np.sin(theta)))
-            self.t += abs(v_f - self.v)/(self.g*np.sin(theta))
-            self.v = v_f
+
+        step_time = abs(v_f - self.v)/(self.g*np.sin(theta))
+        self.t += step_time
+        self.v = v_f
         
         self.prev_state = self.state
         self.y_coords.append(self.prev_state)
         
-        reward = 0
+        '''
+        Reward Function
+        ===============
+        * After each step, reward = 1/step_time if step_time is a finite number, else reward = 0
+        * After each iteration, i.e., when one full path has been constructed, multiply the reward of the agent by one of the following factors:
+          - (number of iterations since new best)*-10: if the time of travel for the current iteration is greater than or equal to the shortest (best) time achieved by the agent, or if the time of travel for the current iteration is not a number
+          - (number of iterations since new best)*10: if time of travel for the current iteration is less than the shortest (best) time achieved by the agent
+          - 10: for the first path that is successfully created
+        '''
+        
+        reward = 1/step_time if (not np.isnan(step_time) and step_time != np.inf) else 0
         
         if (len(self.y_coords) == len(self.x_coords)):
             self.completed_iterations += 1
             if np.isnan(self.t):
-                reward = -1
+                self.iterations_since_new_best += 1
+                reward *= -10*self.iterations_since_new_best
             elif self.best_t == np.inf:
                 self.best_y_coords = self.y_coords
-                reward = 1
-                reward = 1/self.t
+                reward *= 10
                 self.best_t = self.t
                 print(self.best_t)
                 print(f"\nNew Best Time = {self.best_t}, \t Optimal Time = {self.optimal_time}")
@@ -251,22 +352,23 @@ class BrachistohroneEnv(Env):
                     self.render()
             elif self.t < self.best_t:
                 self.best_y_coords = self.y_coords
-                reward = 1
-                reward = 1/self.t
+                reward *= 10*(self.iterations_since_new_best)
+                self.iterations_since_new_best = 0
                 self.best_t = self.t
                 print(f"\nNew Best Time = {self.best_t}, \t Optimal Time = {self.optimal_time}")
                 if not self.interactive:
                     self.render()
             elif self.t >= self.best_t:
-                reward = -1
-                reward = 1/self.t
+                self.iterations_since_new_best += 1
+                reward *= -10*self.iterations_since_new_best
             
             if self.interactive:
                 self.render(1)
             self.reset()
         if self.completed_iterations == self.iterations:
             self.done = True
-        
+        if reward == np.inf:
+            reward = 0
         return self.state, reward, self.done, {}
 
     def render(self, pause_time = 0.1):
@@ -298,14 +400,15 @@ class BrachistohroneEnv(Env):
         self.completed_iterations = 0
         return self.state
 
-#https://programtalk.com/python-examples/rl.agents.DDPGAgent/
-#https://github.com/tensorneko/keras-rl2/pull/18
-#https://keras-rl.readthedocs.io/en/latest/agents/ddpg/
+'''
+build_actor
+===========
+Builds Actor deep-neural network for DDPG agent using the
+Taken from the following source: https://github.com/keras-rl/keras-rl/blob/master/examples/ddpg_pendulum.py
+'''
 def build_actor(env):
-    
     nb_actions = env.action_space.shape[0]
     actor = Sequential()
-
     actor.add(Flatten(input_shape=(1,) + env.observation_space.shape))
     actor.add(Dense(16))
     actor.add(Activation('relu'))
@@ -315,19 +418,14 @@ def build_actor(env):
     actor.add(Activation('relu'))
     actor.add(Dense(nb_actions))
     actor.add(Activation('linear'))
-    
-#    actor.add(Embedding(input_dim=100, output_dim=10))
-##     The output of GRU will be a 3D tensor of shape (batch_size, timesteps, 256)
-#    actor.add(LSTM(10, return_sequences=True))
-#
-##     The output of SimpleRNN will be a 2D tensor of shape (batch_size, 128)
-#    actor.add(SimpleRNN(10))
-#
-#    actor.add(Dense(nb_actions))
-#    actor.add(Activation('linear'))
-    
     return actor
 
+'''
+build_critic
+============
+Builds critic deep-neural network for DDPG agent
+Taken from the following source: https://github.com/keras-rl/keras-rl/blob/master/examples/ddpg_pendulum.py
+'''
 def build_critic(env):
     nb_actions = env.action_space.shape[0]
     action_input = Input(shape=(nb_actions,), name='action_input')
@@ -341,36 +439,49 @@ def build_critic(env):
     critic = Model(inputs=[action_input, observation_input], outputs=x)
     return critic, action_input
 
+'''
+build_agent
+============
+Builds DDPG agent using actor and critic deep-neural networks
+Taken from the following source: https://github.com/keras-rl/keras-rl/blob/master/examples/ddpg_pendulum.py
+'''
 def build_agent(env, actor, critic, action_input):
     nb_actions = env.action_space.shape[0]
-    memory = SequentialMemory(limit = 50000, window_length = 1)
+    memory = SequentialMemory(limit = int(1e5), window_length = 1)
     ddpg = DDPGAgent(nb_actions, actor, critic, action_input, memory = memory, batch_size = 32)
     return ddpg
 
 if __name__ == '__main__':
-    x_start, x_end, num_x_points = 10, 20, 10
-#    test = BrachistohroneEnv(x_end = 1, x_start = -1, num_x_points = 10, y_start = 10, y_end = 0)
-    test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 20, y_end = 10, point_dist = "linear", autoscale = False)
-    print(test.action_space.sample())
-    print(test.observation_space.sample())
-    states = test.observation_space.shape
-    actions =  test.action_space.shape
-    print(states,actions)
-    print(test.action_space.high,test.action_space.low)
-    actor = build_actor(test)
-    actor.summary()
-#    for layer in actor.layers:
-#        print(actor.input_shape)
-    critic, action_input = build_critic(test)
-    critic.summary()
+    x_start, x_end,  = 0, np.pi #starting and ending x coordinates
+    y_start, y_end = 0, -2 #starting and ending y coordinates
+    num_x_points = 11 #number of points we wish to sample
+    
+    #create environment
+    test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 0, y_end = -2, point_dist = "linear", autoscale = True, activation = "tanh", activation_factor = 0.6)
+    
+    actor = build_actor(test) #actor neural network
+    actor.summary() #summary of actor neural network architecture
+    critic, action_input = build_critic(test) #critic neural network
+    critic.summary() #summary of critic neural network architecture
     
     ddpg = build_agent(test, actor, critic, action_input)
-    ddpg.compile([LazyAdam(1e-5), LazyAdam(1e-5)])
+    ddpg.compile([LazyAdam(1e-5), LazyAdam(1e-4)]) #Giving actor and critic neural networks Adam optimizers with learning rate 1e-5 and 1e-4 respectively. Generally a good idea to make the actor a slower learner than the critic. See the brief explanation here: https://www.reddit.com/r/reinforcementlearning/comments/lsza9m/why_different_learning_rates_for_actor_and_critic/
     
-    adjust_model = AdjustModel(update_every = 0, lr_factor = 0, update_lr = False, reset_weights = False)
-    ddpg.fit(test, nb_steps = 5e4, visualize = False, callbacks=[adjust_model])
+    #Defining a callback that gets called every 10000 steps
+    adjust_model = AdjustModel(update_every = 10000, lr_factor = 0.9, update_lr = True, reset_weights = False)
+    try:
+        #Start the training
+        ddpg.fit(test, nb_steps = 1e10, visualize = False, callbacks=[adjust_model])
+    except Exception as exception:
+        #Sometimes we an unexpected error. In that case, let's save the current model and stop training.
+        print(f"\n\nAn exception of type {exception.__class__.__name__} was raised and caught\n")
+        
     print("Best time = ",test.best_t)
-    
+    try:
+        input("\nPress Enter for Symbolic Regression, or ctr-c to exit: ")
+    except KeyboardInterrupt:
+        sys.exit()
+
     X = test.x_coords
     y = np.array(test.best_y_coords)
     plt.title(f"Number of Sampled Points = {num_x_points}")
@@ -378,17 +489,28 @@ if __name__ == '__main__':
     plt.scatter((X[0], X[-1]), (y[0], y[-1]))
     
     np.savetxt("RL_Brachistochrone.txt", np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
+    np.savetxt("RL_Brachistochrone_best_time.txt", np.array([test.best_t]))
+    
+    '''
+    #Only if you want to run symbolic regression later, then here's how you could load the data
     best_vals = np.loadtxt("RL_Brachistochrone.txt")
+    X = best_vals[:, 0]
+    y = best_vals[:, 1]
+    '''
     
     X = X.reshape(-1,1)
     
+    #Symbolic Regression
+    #===================
+    #Code Taken from Here: https://github.com/MilesCranmer/PySR
+    
     model = PySRRegressor(
-    niterations=40,  # < Increase me for better results
+    niterations=100,  # < Increase me for better results
     binary_operators=["+", "*"],
     unary_operators=[
-        "cos",
+#        "cos",
         "exp",
-        "sin",
+#        "sin",
         "inv(x) = 1/x",
         # ^ Custom operator (julia syntax)
     ],
@@ -406,5 +528,5 @@ if __name__ == '__main__':
     x_points = np.linspace(x_start, x_end, 1000)
     plt.plot(x_points, model_selection(x_points), label = rf"f(x) = ${model.latex()}$")
     plt.legend()
-    plt.savefig("RL_Brachistochrone.png",dpi=5*96)
+    plt.savefig("RL_Brachistochrone.png",dpi=5*96) #Save the figure and show your friends! :)
         
