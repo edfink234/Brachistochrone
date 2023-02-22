@@ -318,7 +318,7 @@ class BrachistohroneEnv(Env):
         else:
             v_f = np.sqrt(np.abs(self.v**2 + 2*self.g*d*np.sin(theta)))
 
-        step_time = abs(v_f - self.v)/(self.g*np.sin(theta))
+        step_time = abs(v_f - self.v)/(self.g*np.sin(theta)) if not isclose(theta,0) else adj / v_f
         self.t += step_time
         self.v = v_f
         
@@ -335,11 +335,11 @@ class BrachistohroneEnv(Env):
           - 10: for the first path that is successfully created
         '''
         
-        reward = 1/step_time if (not np.isnan(step_time) and step_time != np.inf) else 0
+        reward = 1#1/step_time if (not np.isnan(step_time) and step_time != np.inf) else 0
         
         if (len(self.y_coords) == len(self.x_coords)):
             self.completed_iterations += 1
-            if np.isnan(self.t):
+            if np.isnan(self.t) or self.t == np.inf:
                 self.iterations_since_new_best += 1
                 reward *= -10*self.iterations_since_new_best
             elif self.best_t == np.inf:
@@ -452,81 +452,121 @@ def build_agent(env, actor, critic, action_input):
     return ddpg
 
 if __name__ == '__main__':
-    x_start, x_end,  = 0, np.pi #starting and ending x coordinates
-    y_start, y_end = 0, -2 #starting and ending y coordinates
-    num_x_points = 11 #number of points we wish to sample
+    run_only_Sr = False
     
-    #create environment
-    test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 0, y_end = -2, point_dist = "linear", autoscale = True, activation = "tanh", activation_factor = 0.6)
-    
-    actor = build_actor(test) #actor neural network
-    actor.summary() #summary of actor neural network architecture
-    critic, action_input = build_critic(test) #critic neural network
-    critic.summary() #summary of critic neural network architecture
-    
-    ddpg = build_agent(test, actor, critic, action_input)
-    ddpg.compile([LazyAdam(1e-5), LazyAdam(1e-4)]) #Giving actor and critic neural networks Adam optimizers with learning rate 1e-5 and 1e-4 respectively. Generally a good idea to make the actor a slower learner than the critic. See the brief explanation here: https://www.reddit.com/r/reinforcementlearning/comments/lsza9m/why_different_learning_rates_for_actor_and_critic/
-    
-    #Defining a callback that gets called every 10000 steps
-    adjust_model = AdjustModel(update_every = 10000, lr_factor = 0.9, update_lr = True, reset_weights = False)
-    try:
-        #Start the training
-        ddpg.fit(test, nb_steps = 1e10, visualize = False, callbacks=[adjust_model])
-    except Exception as exception:
-        #Sometimes we an unexpected error. In that case, let's save the current model and stop training.
-        print(f"\n\nAn exception of type {exception.__class__.__name__} was raised and caught\n")
+    if not run_only_Sr:
+        x_start, x_end,  = 0, np.pi #starting and ending x coordinates
+        y_start, y_end = 0, -2 #starting and ending y coordinates
+        num_x_points = 12 #number of points we wish to sample
         
-    print("Best time = ",test.best_t)
-    try:
-        input("\nPress Enter for Symbolic Regression, or ctr-c to exit: ")
-    except KeyboardInterrupt:
-        sys.exit()
+        #create environment
+        test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 0, y_end = -2, point_dist = "linear", autoscale = True, activation = "tanh", activation_factor = 0.6)
+        
+        actor = build_actor(test) #actor neural network
+        actor.summary() #summary of actor neural network architecture
+        critic, action_input = build_critic(test) #critic neural network
+        critic.summary() #summary of critic neural network architecture
+        
+        ddpg = build_agent(test, actor, critic, action_input)
+        ddpg.compile([LazyAdam(1e-5), LazyAdam(1e-4)]) #Giving actor and critic neural networks Adam optimizers with learning rate 1e-5 and 1e-4 respectively. Generally a good idea to make the actor a slower learner than the critic. See the brief explanation here: https://www.reddit.com/r/reinforcementlearning/comments/lsza9m/why_different_learning_rates_for_actor_and_critic/
+        
+        #Defining a callback that gets called every 10000 steps
+        adjust_model = AdjustModel(update_every = 10000, lr_factor = 0.95, update_lr = True, reset_weights = False)
+        try:
+            #Start the training
+            ddpg.fit(test, nb_steps = 1e10, visualize = False, callbacks=[adjust_model])
+        except Exception as exception:
+            #Sometimes we an unexpected error. In that case, let's save the current model and stop training.
+            print(f"\n\nAn exception of type {exception.__class__.__name__} was raised and caught\n")
+            
+        print("Best time = ",test.best_t)
+        try:
+            input("\nPress Enter for Symbolic Regression, or ctr-c to exit: ")
+        except KeyboardInterrupt:
+            sys.exit()
 
-    X = test.x_coords
-    y = np.array(test.best_y_coords)
-    plt.title(f"Number of Sampled Points = {num_x_points}")
-    plt.plot(X, y, label = f"Time Taken = {test.best_t:.3f} seconds")
-    plt.scatter((X[0], X[-1]), (y[0], y[-1]))
-    
-    np.savetxt("RL_Brachistochrone.txt", np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
-    np.savetxt("RL_Brachistochrone_best_time.txt", np.array([test.best_t]))
-    
-    '''
-    #Only if you want to run symbolic regression later, then here's how you could load the data
-    best_vals = np.loadtxt("RL_Brachistochrone.txt")
-    X = best_vals[:, 0]
-    y = best_vals[:, 1]
-    '''
-    
-    X = X.reshape(-1,1)
-    
-    #Symbolic Regression
-    #===================
-    #Code Taken from Here: https://github.com/MilesCranmer/PySR
-    
-    model = PySRRegressor(
-    niterations=100,  # < Increase me for better results
-    binary_operators=["+", "*"],
-    unary_operators=[
-#        "cos",
-        "exp",
-#        "sin",
-        "inv(x) = 1/x",
-        # ^ Custom operator (julia syntax)
-    ],
-    extra_sympy_mappings={"inv": lambda x: 1 / x},
-    # ^ Define operator for SymPy as well
-    loss="loss(x, y) = (x - y)^2",
-    # ^ Custom loss function (julia syntax)
-    )
-    model.fit(X, y)
-    print(model.latex())
-    print(model.sympy())
-    model_selection = lambdify(symbols('x0'), model.sympy())
-    
-#    x_points = np.linspace(10**x_start, 10**x_end, 1000)
-    x_points = np.linspace(x_start, x_end, 1000)
-    plt.plot(x_points, model_selection(x_points), label = rf"f(x) = ${model.latex()}$")
-    plt.legend()
-    plt.savefig("RL_Brachistochrone.png",dpi=5*96) #Save the figure and show your friends! :)
+        X = test.x_coords
+        y = np.array(test.best_y_coords)
+        plt.title(f"Number of Sampled Points = {num_x_points}")
+        plt.plot(X, y, label = f"Time Taken = {test.best_t:.3f} seconds")
+        plt.scatter((X[0], X[-1]), (y[0], y[-1]))
         
+        np.savetxt("RL_Brachistochrone.txt", np.concatenate((np.expand_dims(X,axis=1),np.expand_dims(y,axis=1)), axis=1))
+        np.savetxt("RL_Brachistochrone_best_time.txt", np.array([test.best_t]))
+        
+        #Symbolic Regression
+        #===================
+        #Code Taken from Here: https://github.com/MilesCranmer/PySR
+        X = X.reshape(-1,1)
+        
+        model = PySRRegressor(
+        niterations=50,  # < Increase me for better results
+        binary_operators=["+", "-", "*"],
+        unary_operators=[
+            "cos",
+    #        "exp",
+    #        "sin",
+            "inv(x) = 1/x",
+            # ^ Custom operator (julia syntax)
+        ],
+        extra_sympy_mappings={"inv": lambda x: 1 / x},
+        # ^ Define operator for SymPy as well
+        loss="loss(x, y) = (x - y)^2",
+        # ^ Custom loss function (julia syntax)
+        )
+        
+        model.fit(X, y)
+        print(model.latex())
+        print(model.sympy())
+        model_selection = lambdify(symbols('x0'), model.sympy())
+
+        #    x_points = np.linspace(10**x_start, 10**x_end, 1000)
+        x_points = np.linspace(x_start, x_end, 1000)
+        plt.plot(x_points, model_selection(x_points), label = rf"f(x) = ${model.latex()}$")
+        plt.legend()
+        plt.savefig("RL_Brachistochrone.png",dpi=5*96) #Save the figure and show your friends! :)
+
+    else: #If symbolic regression didn't go well and you want to
+        best_vals = np.loadtxt("RL_Brachistochrone.txt")
+        X = best_vals[:, 0]
+        y = best_vals[:, 1]
+        x_points, y_points, optimal_time = BrachistohronePoints((X[0], y[0]), (X[-1], y[-1]))
+        plt.plot(x_points, y_points, label = f"Best Time = {optimal_time:0.3f} seconds")
+        best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
+        plt.plot(X, y, label = f"Time Taken = {best_t:.3f} seconds")
+        plt.scatter((X[0], X[-1]), (y[0], y[-1]))
+        X = X.reshape(-1,1)
+        
+        #Symbolic Regression
+        #===================
+        #Code Taken from Here: https://github.com/MilesCranmer/PySR
+        
+        model = PySRRegressor(
+        niterations=50,  # < Increase me for better results
+        binary_operators=["+", "-", "*"],
+        unary_operators=[
+            "cos",
+    #        "exp",
+    #        "sin",
+            "inv(x) = 1/x",
+            # ^ Custom operator (julia syntax)
+        ],
+        extra_sympy_mappings={"inv": lambda x: 1 / x},
+        # ^ Define operator for SymPy as well
+        loss="loss(x, y) = (x - y)^2",
+        # ^ Custom loss function (julia syntax)
+        )
+        model.fit(X, y)
+        print(model.latex())
+        print(model.sympy())
+        model_selection = lambdify(symbols('x0'), model.sympy())
+        
+    #    x_points = np.linspace(10**x_start, 10**x_end, 1000)
+        x_start = X[0]
+        x_end = X[-1]
+        x_points = np.linspace(x_start, x_end, 1000)
+        plt.title(f"Number of Sampled Points = {len(X)}")
+        plt.plot(x_points, model_selection(x_points), label = rf"f(x) = ${model.latex()}$")
+        plt.legend()
+        plt.savefig("RL_Brachistochrone.png",dpi=5*96) #Save the figure and show your friends! :)
+            
