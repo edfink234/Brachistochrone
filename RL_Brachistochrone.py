@@ -452,12 +452,12 @@ def build_agent(env, actor, critic, action_input):
     return ddpg
 
 if __name__ == '__main__':
-    run_only_Sr = False
+    run_only_Sr = True
     
     if not run_only_Sr:
         x_start, x_end,  = 0, np.pi #starting and ending x coordinates
         y_start, y_end = 0, -2 #starting and ending y coordinates
-        num_x_points = 12 #number of points we wish to sample
+        num_x_points = 13 #number of points we wish to sample
         
         #create environment
         test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 0, y_end = -2, point_dist = "linear", autoscale = True, activation = "tanh", activation_factor = 0.6)
@@ -526,10 +526,13 @@ if __name__ == '__main__':
         plt.legend()
         plt.savefig("RL_Brachistochrone.png",dpi=5*96) #Save the figure and show your friends! :)
 
-    else: #If symbolic regression didn't go well and you want to
+    else: #If symbolic regression didn't go well and you want to redo it
         best_vals = np.loadtxt("RL_Brachistochrone.txt")
+#        best_vals = np.loadtxt("train_data_25p.csv", delimiter=',')
         X = best_vals[:, 0]
         y = best_vals[:, 1]
+#        X = best_vals[0]
+#        y = best_vals[1]
         x_points, y_points, optimal_time = BrachistohronePoints((X[0], y[0]), (X[-1], y[-1]))
         plt.plot(x_points, y_points, label = f"Best Time = {optimal_time:0.3f} seconds")
         best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
@@ -542,7 +545,7 @@ if __name__ == '__main__':
         #Code Taken from Here: https://github.com/MilesCranmer/PySR
         
         model = PySRRegressor(
-        niterations=50,  # < Increase me for better results
+        niterations=500,  # < Increase me for better results
         binary_operators=["+", "-", "*"],
         unary_operators=[
             "cos",
