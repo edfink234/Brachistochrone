@@ -1,0 +1,11 @@
+gym==0.26.2
+keras==2.11.0
+matplotlib==3.7.0
+numpy==1.24.2
+pysr==0.11.15
+rl==3.1
+scipy==1.10.1
+sympy==1.11.1
+tensorflow_addons==0.19.0
+tensorflow-macos==2.11.0
+keras-rl==0.4.2

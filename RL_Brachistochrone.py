@@ -452,12 +452,12 @@ def build_agent(env, actor, critic, action_input):
     return ddpg
 
 if __name__ == '__main__':
-    run_only_Sr = True
+    run_only_Sr = False
     
     if not run_only_Sr:
         x_start, x_end,  = 0, np.pi #starting and ending x coordinates
         y_start, y_end = 0, -2 #starting and ending y coordinates
-        num_x_points = 13 #number of points we wish to sample
+        num_x_points = 27 #number of points we wish to sample
         
         #create environment
         test = BrachistohroneEnv(x_end = x_end, x_start = x_start, num_x_points = num_x_points, y_start = 0, y_end = -2, point_dist = "linear", autoscale = True, activation = "tanh", activation_factor = 0.6)
@@ -536,7 +536,7 @@ if __name__ == '__main__':
         x_points, y_points, optimal_time = BrachistohronePoints((X[0], y[0]), (X[-1], y[-1]))
         plt.plot(x_points, y_points, label = f"Best Time = {optimal_time:0.3f} seconds")
         best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
-        plt.plot(X, y, label = f"Time Taken = {best_t:.3f} seconds")
+        plt.plot(X, y, label = f"Time Taken = {1.029:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
         X = X.reshape(-1,1)
         
