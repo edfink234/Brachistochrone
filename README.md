@@ -5,11 +5,20 @@ Brachistochrone.py just tries to guess faster paths from point A to point B unde
 RL_Brachistrochrone.py implements a reinforcement learning environment with a neural network that tries to learn the best path under the the influence of only gravity, and also symbolic regression to produce candidate equations based on the coordinates of the best path found by the reinforcement learning agent. The paths are also shown in real-time via a matplotlib animation. An example output is shown in RL_Brachistrochrone.png
 
 ## To Install
+
+
+
+1. Create and start virtual environment
 ```
-1. cat requirements.txt | xargs -n 1 pip3 install
+python3 -m venv myvenv
+source myvenv/bin/activate
+```
+2. Install requirements.txt
+``` 
+cat requirements.txt | xargs -n 1 pip3 install
 ```
 
-After installing requirements.txt, make the following file modifications (substituting your environtname with `myvenv` and your python version with ```python3.9```:
+After installing requirements.txt, make the following file modifications (substituting your environtname with `myvenv` and your python version with ```python3.9```):
 
 ### myvenv/lib/python3.9/site-packages/rl/agents/ddpg.py 
  - Change `if hasattr(actor.output, '__len__') and len(actor.output) > 1:` to `if hasattr(actor.output, '__shape__') and len(actor.output) > 2:`
