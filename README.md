@@ -18,7 +18,7 @@ source myvenv/bin/activate
 cat requirements.txt | xargs -n 1 pip3 install
 ```
 
-After installing requirements.txt, make the following file modifications (substituting your environtname with `myvenv` and your python version with ```python3.9```):
+After installing requirements.txt, make the following file modifications (substituting your environment name with `myvenv` and your python version with ```python3.9```):
 
 ### myvenv/lib/python3.9/site-packages/rl/agents/ddpg.py 
  - Change `if hasattr(actor.output, '__len__') and len(actor.output) > 1:` to `if hasattr(actor.output, '__shape__') and len(actor.output) > 2:`
