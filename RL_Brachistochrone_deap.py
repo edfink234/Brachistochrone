@@ -35,7 +35,8 @@ from matplotlib.animation import FuncAnimation
 from scipy.optimize import ridder, fsolve
 from gym import Env
 from gym.spaces import Box
-from pysr import PySRRegressor
+import operator
+from deap import base, creator, tools, gp, algorithms
 from math import isclose
 
 import tensorflow as tf
@@ -588,7 +589,7 @@ if __name__ == '__main__':
     if not run_only_Sr:
         x_start, x_end, = 0, np.pi  # starting and ending x coordinates
         y_start, y_end = 0, -2  # starting and ending y coordinates
-        num_x_points = 27  # number of points we wish to sample
+        num_x_points = 12  # number of points we wish to sample
 
         # create environment
         test = BrachistohroneEnv(
@@ -649,89 +650,49 @@ if __name__ == '__main__':
 
         # Symbolic Regression
         # ===================
-        # Code Taken from Here: https://github.com/MilesCranmer/PySR
         X = X.reshape(-1, 1)
 
-        model = PySRRegressor(
-            niterations=50,  # < Increase me for better results
-            binary_operators=["+", "-", "*"],
-            unary_operators=[
-                "cos",
-                #        "exp",
-                #        "sin",
-                "inv(x) = 1/x",
-                # ^ Custom operator (julia syntax)
-            ],
-            extra_sympy_mappings={"inv": lambda x: 1 / x},
-            nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}}
-            # ^ Define operator for SymPy as well
-            loss="loss(x, y) = (x - y)^2",
-            # ^ Custom loss function (julia syntax)
-        )
+        # Define custom operators and unary functions
+        pset = gp.PrimitiveSet("main", 1)
+        pset.addPrimitive(operator.add, 2)
+        pset.addPrimitive(operator.sub, 2)
+        pset.addPrimitive(operator.mul, 2)
+        pset.addPrimitive(np.sin, 1)
+        pset.addPrimitive(np.cos, 1)
+#        pset.addPrimitive(np.linalg.inv, 1)  # Define inv(x) = 1/x
 
-        model.fit(X, y)
-        print(model.latex())
-        print(model.sympy())
-        model_selection = lambdify(symbols('x0'), model.sympy())
+        # Define custom loss function
+        def custom_loss(x, y):
+            return np.sum((x - y) ** 2)
 
-        #    x_points = np.linspace(10**x_start, 10**x_end, 1000)
-        x_points = np.linspace(x_start, x_end, 1000)
-        plt.plot(x_points, model_selection(x_points),
-                 label=rf"f(x) = ${model.latex()}$")
-        plt.legend()
-        # Save the figure and show your friends! :)
-        plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
-        print("Best loss:", np.sum((model_selection(X)-y)**2))
+        # Define fitness function (minimize the loss)
+        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+        creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
 
-    else:  # If symbolic regression didn't go well and you want to redo it
-        best_vals = np.loadtxt("RL_Brachistochrone.txt")
-#        best_vals = np.loadtxt("train_data_25p.csv", delimiter=',')
-        X = best_vals[:, 0]
-        y = best_vals[:, 1]
-#        X = best_vals[0]
-#        y = best_vals[1]
-        x_points, y_points, optimal_time = BrachistohronePoints(
-            (X[0], y[0]), (X[-1], y[-1]))
-        plt.plot(x_points, y_points,
-                 label=f"Best Time = {optimal_time:0.3f} seconds")
-        best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
-        plt.plot(X, y, label=f"Time Taken = {1.029:.3f} seconds")
-        plt.scatter((X[0], X[-1]), (y[0], y[-1]))
-        X = X.reshape(-1, 1)
+        def evaluate_individual(individual, X, y):
+            func = gp.compile(individual, pset)
+            y_pred = np.array([func(x) for x in X])
+            loss = custom_loss(y_pred, y)
+            return loss.item(),
 
-        # Symbolic Regression
-        # ===================
-        # Code Taken from Here: https://github.com/MilesCranmer/PySR
+        toolbox = base.Toolbox()
+        toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
+        toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
+        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
-        model = PySRRegressor(
-            niterations=500,  # < Increase me for better results
-            binary_operators=["+", "-", "*"],
-            unary_operators=[
-                "cos",
-                #        "exp",
-                "sin",
-                "inv(x) = 1/x",
-                # ^ Custom operator (julia syntax)
-            ],
-            extra_sympy_mappings={"inv": lambda x: 1 / x},
-            # ^ Define operator for SymPy as well
-            loss="loss(x, y) = (x - y)^2",
-            nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}}
-            # ^ Custom loss function (julia syntax)
-        )
-        model.fit(X, y)
-        print(model.latex())
-        print(model.sympy())
-        model_selection = lambdify(symbols('x0'), model.sympy())
+        # Define other DEAP components and settings
+        toolbox.register("mate", gp.cxOnePoint)
+        toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
+        toolbox.register("select", tools.selTournament, tournsize=3)
+        toolbox.register("evaluate", evaluate_individual, X=X, y=y)
+        
+        pop = toolbox.population(n=100)
+        algorithms.eaSimple(pop, toolbox, cxpb=0.7, mutpb=0.2, ngen=50, stats=None, verbose=True)
 
-    #    x_points = np.linspace(10**x_start, 10**x_end, 1000)
-        x_start = X[0]
-        x_end = X[-1]
-        x_points = np.linspace(x_start, x_end, 1000)
-        plt.title(f"Number of Sampled Points = {len(X)}")
-        plt.plot(x_points, model_selection(x_points),
-                 label=rf"f(x) = ${model.latex()}$")
-        plt.legend()
-        # Save the figure and show your friends! :)
-        plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
-        print("Best loss:", np.sum((model_selection(X)-y)**2))
+        best_individual = tools.selBest(pop, k=1)[0]
+        best_func = gp.compile(best_individual, pset)
+        y_pred = np.array([best_func(x) for x in X])
+        best_loss = custom_loss(y_pred, y)
+
+        print("Best individual:", best_individual)
+        print("Best loss:", best_loss)
