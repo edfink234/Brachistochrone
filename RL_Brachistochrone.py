@@ -707,13 +707,14 @@ if __name__ == '__main__':
             unary_operators=[
                 "cos",
                 #        "exp",
-                #        "sin",
+                "sin",
                 "inv(x) = 1/x",
                 # ^ Custom operator (julia syntax)
             ],
             extra_sympy_mappings={"inv": lambda x: 1 / x},
             # ^ Define operator for SymPy as well
             loss="loss(x, y) = (x - y)^2",
+            nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}}
             # ^ Custom loss function (julia syntax)
         )
         model.fit(X, y)
