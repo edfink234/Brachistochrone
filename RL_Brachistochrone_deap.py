@@ -662,6 +662,8 @@ if __name__ == '__main__':
         pset.addPrimitive(operator.mul, 2)
         pset.addPrimitive(np.sin, 1)
         pset.addPrimitive(np.cos, 1)
+        
+        pset.addEphemeralConstant("const", lambda: random.uniform(-1, 1))
         def inv(x):
             x = np.array(x)
             return 1/x if np.all(x) else x
@@ -697,12 +699,12 @@ if __name__ == '__main__':
         toolbox.register("evaluate", evaluate_individual, X=X, y=y)
         
         pop = toolbox.population(n=100)
-        algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=5000, stats=None)
+        algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=500, stats=None)
 
         best_individual = tools.selBest(pop, k=1)[0]
         best_func = gp.compile(best_individual, pset)
         y_pred = np.array([best_func(x) for x in X])
-        best_loss = custom_loss(y_pred, y)
+        best_loss = np.sum((y_pred-y)**2)
 
         print("Best individual:", best_individual)
         print("Best func", best_func, type(best_func))

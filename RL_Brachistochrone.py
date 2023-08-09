@@ -588,7 +588,7 @@ if __name__ == '__main__':
     if not run_only_Sr:
         x_start, x_end, = 0, np.pi  # starting and ending x coordinates
         y_start, y_end = 0, -2  # starting and ending y coordinates
-        num_x_points = 27  # number of points we wish to sample
+        num_x_points = 12  # number of points we wish to sample
 
         # create environment
         test = BrachistohroneEnv(
