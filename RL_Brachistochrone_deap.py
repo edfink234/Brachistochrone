@@ -15,10 +15,11 @@ non-parametric form of the Brachistochrone
 # if hasattr(critic.output, '__len__') and len(critic.output) > 1: -> if
 # hasattr(critic.output, '__shape__') and len(critic.output) > 2:
 
-import warnings
 import sys
-from sympy.utilities.lambdify import lambdify
-from sympy import symbols
+sys.setrecursionlimit(10000)
+import warnings
+import sympy as sp
+from sympy import sin, cos
 from rl.memory import SequentialMemory
 from rl.policy import BoltzmannQPolicy
 from rl.agents import DDPGAgent
@@ -36,8 +37,10 @@ from scipy.optimize import ridder, fsolve
 from gym import Env
 from gym.spaces import Box
 import operator
+from operator import add, sub, mul
 from deap import base, creator, tools, gp, algorithms
 from math import isclose
+import random
 
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
@@ -659,22 +662,29 @@ if __name__ == '__main__':
         pset.addPrimitive(operator.mul, 2)
         pset.addPrimitive(np.sin, 1)
         pset.addPrimitive(np.cos, 1)
-#        pset.addPrimitive(np.linalg.inv, 1)  # Define inv(x) = 1/x
-
+        def inv(x):
+            x = np.array(x)
+            return 1/x if np.all(x) else x
+        pset.addPrimitive(inv, 1)
+        
         # Define custom loss function
-        def custom_loss(x, y):
-            return np.sum((x - y) ** 2)
-
+        def custom_loss(y_pred, y):
+            if np.allclose(y_pred, y_pred[0]):
+                return np.inf
+            loss = np.sum((y_pred - y) ** 2)
+            return loss
+            
         # Define fitness function (minimize the loss)
         creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
         creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
-
+        
         def evaluate_individual(individual, X, y):
             func = gp.compile(individual, pset)
             y_pred = np.array([func(x) for x in X])
             loss = custom_loss(y_pred, y)
-            return loss.item(),
-
+            print(loss)
+            return loss,
+            
         toolbox = base.Toolbox()
         toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
         toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
@@ -683,11 +693,11 @@ if __name__ == '__main__':
         # Define other DEAP components and settings
         toolbox.register("mate", gp.cxOnePoint)
         toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
-        toolbox.register("select", tools.selTournament, tournsize=3)
+        toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.9, fitness_first=True)
         toolbox.register("evaluate", evaluate_individual, X=X, y=y)
         
         pop = toolbox.population(n=100)
-        algorithms.eaSimple(pop, toolbox, cxpb=0.7, mutpb=0.2, ngen=50, stats=None, verbose=True)
+        algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=5000, stats=None)
 
         best_individual = tools.selBest(pop, k=1)[0]
         best_func = gp.compile(best_individual, pset)
@@ -695,4 +705,17 @@ if __name__ == '__main__':
         best_loss = custom_loss(y_pred, y)
 
         print("Best individual:", best_individual)
+        print("Best func", best_func, type(best_func))
         print("Best loss:", best_loss)
+
+        x_points = np.linspace(x_start, x_end, 1000)
+        
+        ARG0 = sp.symbols('ARG0')
+        expr = sp.sympify(str(best_individual))
+        expr = sp.latex(expr)
+        
+        plt.plot(x_points, best_func(x_points),
+                 label=rf"f(x) = ${expr}$")
+        plt.legend()
+        # Save the figure and show your friends! :)
+        plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
