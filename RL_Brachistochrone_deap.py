@@ -678,6 +678,15 @@ if __name__ == '__main__':
     pset.addPrimitive(operator.add, 2)
     pset.addPrimitive(operator.sub, 2)
     pset.addPrimitive(operator.mul, 2)
+    def pow(base, power):
+        try:
+            result = abs(base)**power
+        except OverflowError:
+            return np.inf
+        else:
+            return result
+            
+    pset.addPrimitive(pow, 2)
     pset.addPrimitive(np.sin, 1)
     pset.addPrimitive(np.cos, 1)
     
@@ -712,8 +721,8 @@ if __name__ == '__main__':
     # Define other DEAP components and settings
     toolbox.register("mate", gp.cxOnePointLeafBiased, termpb=0.1)
     toolbox.register("mutate", gp.mixedMutate, expr=toolbox.expr, pset=pset, prob = [1, 0, 0])
-#    toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1, fitness_first=True)
-    toolbox.register("select", tools.selStochasticUniversalSampling)
+    toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.4, fitness_first=True)
+#    toolbox.register("select", tools.selSPEA2)
     toolbox.register("evaluate", evaluate_individual, X=X, y=y)
     
     def feasible(individual):
@@ -756,6 +765,8 @@ if __name__ == '__main__':
             except:
                 if isinstance(y_pred, float):
                     y_pred = np.full_like(X, fill_value = y_pred)
+                elif isinstance(y_pred, complex):
+                    y_pred = np.full_like(X, fill_value = 1)
                 else:
                     print(func(X), type(func(X)), X.shape)
                     print("Exiting...")
@@ -803,6 +814,6 @@ if __name__ == '__main__':
                  label=rf"f(x) = ${new_expr}$")
         plt.legend()
         # Save the figure and show your friends! :)
-        if best_loss < 11.412352072449064:
+        if best_loss < 8.337045599793958:
             print("New best")
             plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
