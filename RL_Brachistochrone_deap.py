@@ -681,7 +681,7 @@ if __name__ == '__main__':
     pset.addPrimitive(np.sin, 1)
     pset.addPrimitive(np.cos, 1)
     
-    pset.addEphemeralConstant("const", lambda: random.uniform(-1, 1))
+    pset.addEphemeralConstant("const", lambda: random.uniform(-10, 10))
     def inv(x):
         x = np.array(x)
         return 1/x if np.all(x) else x
@@ -710,38 +710,45 @@ if __name__ == '__main__':
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
     # Define other DEAP components and settings
-    toolbox.register("mate", gp.cxOnePoint)
-    toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
-    toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.9, fitness_first=True)
+    toolbox.register("mate", gp.cxOnePointLeafBiased, termpb=0.1)
+    toolbox.register("mutate", gp.mixedMutate, expr=toolbox.expr, pset=pset, prob = [1, 0, 0])
+#    toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1, fitness_first=True)
+    toolbox.register("select", tools.selStochasticUniversalSampling)
     toolbox.register("evaluate", evaluate_individual, X=X, y=y)
     
     def feasible(individual):
         """Feasibility function for the individual. Returns True if feasible False
         otherwise."""
-        if len(gp.PrimitiveTree(individual)) <= 10:
+        tree = gp.PrimitiveTree(individual)
+        if len(tree) <= 9 and tree.height <= 2:
             return True
         return False
-
+    
     def distance(individual):
         """A distance function to the feasibility region."""
-        complexity = len(gp.PrimitiveTree(individual))
-        return 0 if complexity <= 10 else (complexity - 10)**2
+        
+        tree = gp.PrimitiveTree(individual)
+        complexity = len(tree)
+        height = tree.height
+        return 0 if complexity <= 9 and height <= 2 else (complexity - 9)**2 + (height - 2)**2
     
+#    https://deap.readthedocs.io/en/master/tutorials/advanced/constraints.html
     toolbox.decorate("evaluate", tools.DeltaPenalty(feasible, np.inf, distance))
     
     pop = toolbox.population(n=10)
     best_loss = np.inf
     best_individual = None
     best_func = None
-    
+        
     # Run the evolutionary algorithm
     try:
         while True:
             # Run one generation of the algorithm
-            algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=1, stats=None, verbose = False)
+            algorithms.eaSimple(pop, toolbox, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, verbose = False)
             
             # Calculate the loss value of the best individual
             individual = tools.selBest(pop, k=1)[0]
+    
             func = gp.compile(individual, pset)
             try:
                 y_pred = func(X)
@@ -762,7 +769,10 @@ if __name__ == '__main__':
                 print(f"New Best Loss = {best_loss}")
                 print("Best individual:", best_individual)
                 print("Complexity =",len(gp.PrimitiveTree(individual)))
+                print("Height =",gp.PrimitiveTree(individual).height)
+                
     except KeyboardInterrupt:
+        print(f"Best Loss = {best_loss}")
         x_start = X[0]
         x_end = X[-1]
         x_points = np.linspace(x_start, x_end, 1000)
@@ -793,4 +803,6 @@ if __name__ == '__main__':
                  label=rf"f(x) = ${new_expr}$")
         plt.legend()
         # Save the figure and show your friends! :)
-        plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
+        if best_loss < 11.412352072449064:
+            print("New best")
+            plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
