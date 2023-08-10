@@ -590,7 +590,7 @@ if __name__ == '__main__':
 
     if not run_only_Sr:
         x_start, x_end, = 0, np.pi  # starting and ending x coordinates
-        y_start, y_end = 0, -2  # starting and ending y coordinates
+        y_start, y_end = 0, -10  # starting and ending y coordinates
         num_x_points = 12  # number of points we wish to sample
 
         # create environment
@@ -598,8 +598,8 @@ if __name__ == '__main__':
             x_end=x_end,
             x_start=x_start,
             num_x_points=num_x_points,
-            y_start=0,
-            y_end=-2,
+            y_start=y_start,
+            y_end=y_end,
             point_dist="linear",
             autoscale=True,
             activation="tanh",
@@ -649,43 +649,6 @@ if __name__ == '__main__':
         np.savetxt("RL_Brachistochrone.txt", np.concatenate(
             (np.expand_dims(X, axis=1), np.expand_dims(y, axis=1)), axis=1))
         np.savetxt("RL_Brachistochrone_best_time.txt", np.array([test.best_t]))
-
-        # Symbolic Regression
-        # ===================
-        # Code Taken from Here: https://github.com/MilesCranmer/PySR
-        X = X.reshape(-1, 1)
-
-        model = PySRRegressor(
-            niterations=50,  # < Increase me for better results
-            binary_operators=["+", "-", "*"],
-            unary_operators=[
-                "cos",
-                #        "exp",
-                "sin",
-                "inv(x) = 1/x",
-                # ^ Custom operator (julia syntax)
-            ],
-            extra_sympy_mappings={"inv": lambda x: 1 / x},
-            nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}},
-            # ^ Define operator for SymPy as well
-            loss="loss(x, y) = (x - y)^2",
-            # ^ Custom loss function (julia syntax)
-        )
-
-        model.fit(X, y)
-        print(model.latex())
-        print(model.sympy())
-        model_selection = lambdify(symbols('x0'), model.sympy())
-
-        #    x_points = np.linspace(10**x_start, 10**x_end, 1000)
-        x_points = np.linspace(x_start, x_end, 1000)
-        plt.plot(x_points, model_selection(x_points),
-                 label=rf"f(x) = ${model.latex()}$")
-        plt.legend()
-        # Save the figure and show your friends! :)
-        plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
-        print("Best loss:", np.sum((model_selection(X).flatten()-y)**2))
-
     else:  # If symbolic regression didn't go well and you want to redo it
         best_vals = np.loadtxt("RL_Brachistochrone.txt")
 #        best_vals = np.loadtxt("train_data_25p.csv", delimiter=',')
@@ -700,41 +663,41 @@ if __name__ == '__main__':
         best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
         plt.plot(X, y, label=f"Time Taken = {1.029:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
-        X = X.reshape(-1, 1)
 
-        # Symbolic Regression
-        # ===================
-        # Code Taken from Here: https://github.com/MilesCranmer/PySR
+    # Symbolic Regression
+    # ===================
+    # Code Taken from Here: https://github.com/MilesCranmer/PySR
 
-        model = PySRRegressor(
-            niterations=500,  # < Increase me for better results
-            binary_operators=["+", "-", "*"],
-            unary_operators=[
-                "cos",
-                #        "exp",
-                "sin",
-                "inv(x) = 1/x",
-                # ^ Custom operator (julia syntax)
-            ],
-            extra_sympy_mappings={"inv": lambda x: 1 / x},
-            # ^ Define operator for SymPy as well
-            loss="loss(x, y) = (x - y)^2",
-            nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}}
-            # ^ Custom loss function (julia syntax)
-        )
-        model.fit(X, y)
-        print(model.latex())
-        print(model.sympy())
-        model_selection = lambdify(symbols('x0'), model.sympy())
+    X = X.reshape(-1, 1)
+    model = PySRRegressor(
+        niterations=500,  # < Increase me for better results
+        binary_operators=["+", "-", "*"],
+        unary_operators=[
+            "cos",
+            #        "exp",
+            "sin",
+            "inv(x) = 1/x",
+            # ^ Custom operator (julia syntax)
+        ],
+        extra_sympy_mappings={"inv": lambda x: 1 / x},
+        # ^ Define operator for SymPy as well
+        loss="loss(x, y) = (x - y)^2",
+        nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}}
+        # ^ Custom loss function (julia syntax)
+    )
+    model.fit(X, y)
+    print(model.latex())
+    print(model.sympy())
+    model_selection = lambdify(symbols('x0'), model.sympy())
 
-    #    x_points = np.linspace(10**x_start, 10**x_end, 1000)
-        x_start = X[0]
-        x_end = X[-1]
-        x_points = np.linspace(x_start, x_end, 1000)
-        plt.title(f"Number of Sampled Points = {len(X)}")
-        plt.plot(x_points, model_selection(x_points),
-                 label=rf"f(x) = ${model.latex()}$")
-        plt.legend()
-        # Save the figure and show your friends! :)
-        plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
-        print("Best loss:", np.sum((model_selection(X).flatten()-y)**2))
+#    x_points = np.linspace(10**x_start, 10**x_end, 1000)
+    x_start = X[0]
+    x_end = X[-1]
+    x_points = np.linspace(x_start, x_end, 1000)
+    plt.title(f"Number of Sampled Points = {len(X)}")
+    plt.plot(x_points, model_selection(x_points),
+             label=rf"f(x) = ${model.latex()}$")
+    plt.legend()
+    # Save the figure and show your friends! :)
+    plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
+    print("Best loss:", np.sum((model_selection(X).flatten()-y)**2))

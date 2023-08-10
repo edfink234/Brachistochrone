@@ -42,6 +42,7 @@ from deap import base, creator, tools, gp, algorithms
 from math import isclose
 import random
 import argparse
+import re
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
 
@@ -594,7 +595,7 @@ if __name__ == '__main__':
 
     if not run_only_Sr:
         x_start, x_end, = 0, np.pi  # starting and ending x coordinates
-        y_start, y_end = 0, -2  # starting and ending y coordinates
+        y_start, y_end = 0, -10  # starting and ending y coordinates
         num_x_points = 12  # number of points we wish to sample
 
         # create environment
@@ -602,8 +603,8 @@ if __name__ == '__main__':
             x_end=x_end,
             x_start=x_start,
             num_x_points=num_x_points,
-            y_start=0,
-            y_end=-2,
+            y_start=y_start,
+            y_end=y_end,
             point_dist="linear",
             autoscale=True,
             activation="tanh",
@@ -654,89 +655,6 @@ if __name__ == '__main__':
             (np.expand_dims(X, axis=1), np.expand_dims(y, axis=1)), axis=1))
         np.savetxt("RL_Brachistochrone_deap_best_time.txt", np.array([test.best_t]))
 
-        # Symbolic Regression
-        # ===================
-        X = X.reshape(-1, 1)
-
-        # Define custom operators and unary functions
-        pset = gp.PrimitiveSet("main", 1)
-        pset.addPrimitive(operator.add, 2)
-        pset.addPrimitive(operator.sub, 2)
-        pset.addPrimitive(operator.mul, 2)
-        pset.addPrimitive(np.sin, 1)
-        pset.addPrimitive(np.cos, 1)
-        
-        pset.addEphemeralConstant("const", lambda: random.uniform(-1, 1))
-        def inv(x):
-            x = np.array(x)
-            return 1/x if np.all(x) else x
-        pset.addPrimitive(inv, 1)
-        
-        # Define custom loss function
-        def custom_loss(y_pred, y):
-            if np.allclose(y_pred, y_pred[0]):
-                return np.inf
-            loss = np.sum((y_pred - y) ** 2)
-            return loss
-            
-        # Define fitness function (minimize the loss)
-        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-        creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
-        
-        def evaluate_individual(individual, X, y):
-            func = gp.compile(individual, pset)
-            y_pred = np.array([func(x) for x in X])
-            loss = custom_loss(y_pred, y)
-            return loss,
-            
-        toolbox = base.Toolbox()
-        toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
-        toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
-        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-
-        # Define other DEAP components and settings
-        toolbox.register("mate", gp.cxOnePoint)
-        toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
-        toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.9, fitness_first=True)
-        toolbox.register("evaluate", evaluate_individual, X=X, y=y)
-        
-        pop = toolbox.population(n=100)
-        best_loss = np.inf
-        best_individual = None
-        best_func = None
-        
-        # Run the evolutionary algorithm
-        try:
-            while True:
-                # Run one generation of the algorithm
-                algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=100, stats=None, verbose = False)
-                
-                # Calculate the loss value of the best individual
-                individual = tools.selBest(pop, k=1)[0]
-                func = gp.compile(individual, pset)
-                y_pred = func(X).flatten()
-                
-                loss = np.sum((y_pred-y)**2)
-                
-                if loss < best_loss:
-                    best_loss = loss
-                    best_individual = individual
-                    best_func = func
-                    print(f"New Best Loss = {best_loss}")
-                    print("Best individual:", best_individual)
-        except KeyboardInterrupt:
-            x_points = np.linspace(x_start, x_end, 1000)
-            
-            ARG0 = sp.symbols('ARG0')
-            expr = sp.sympify(str(best_individual))
-            expr = sp.latex(expr)
-#            print(expr)
-            plt.plot(x_points, best_func(x_points),
-                     label=rf"f(x) = ${expr}$")
-            plt.legend()
-            # Save the figure and show your friends! :)
-            plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
-
     else:  # If symbolic regression didn't go well and you want to redo it
         best_vals = np.loadtxt("RL_Brachistochrone_deap.txt")
 #        best_vals = np.loadtxt("train_data_25p.csv", delimiter=',')
@@ -751,84 +669,128 @@ if __name__ == '__main__':
         best_t = np.loadtxt("RL_Brachistochrone_deap_best_time.txt")
         plt.plot(X, y, label=f"Time Taken = {best_t:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
-        X = X.reshape(-1, 1)
+    
+    # Symbolic Regression
+    # ===================
+    X = X.reshape(-1, 1)
+    # Define custom operators and unary functions
+    pset = gp.PrimitiveSet("main", 1)
+    pset.addPrimitive(operator.add, 2)
+    pset.addPrimitive(operator.sub, 2)
+    pset.addPrimitive(operator.mul, 2)
+    pset.addPrimitive(np.sin, 1)
+    pset.addPrimitive(np.cos, 1)
+    
+    pset.addEphemeralConstant("const", lambda: random.uniform(-1, 1))
+    def inv(x):
+        x = np.array(x)
+        return 1/x if np.all(x) else x
+    pset.addPrimitive(inv, 1)
+    
+    # Define custom loss function
+    def custom_loss(y_pred, y):
+        if np.allclose(y_pred, y_pred[0]):
+            return np.inf
+        loss = np.sum((y_pred - y) ** 2)
+        return loss
+        
+    # Define fitness function (minimize the loss)
+    creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+    creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
+    
+    def evaluate_individual(individual, X, y):
+        func = gp.compile(individual, pset)
+        y_pred = np.array([func(x) for x in X])
+        loss = custom_loss(y_pred, y)
+        return loss,
+        
+    toolbox = base.Toolbox()
+    toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
+    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
-                # Define custom operators and unary functions
-        pset = gp.PrimitiveSet("main", 1)
-        pset.addPrimitive(operator.add, 2)
-        pset.addPrimitive(operator.sub, 2)
-        pset.addPrimitive(operator.mul, 2)
-        pset.addPrimitive(np.sin, 1)
-        pset.addPrimitive(np.cos, 1)
-        
-        pset.addEphemeralConstant("const", lambda: random.uniform(-1, 1))
-        def inv(x):
-            x = np.array(x)
-            return 1/x if np.all(x) else x
-        pset.addPrimitive(inv, 1)
-        
-        # Define custom loss function
-        def custom_loss(y_pred, y):
-            if np.allclose(y_pred, y_pred[0]):
-                return np.inf
-            loss = np.sum((y_pred - y) ** 2)
-            return loss
+    # Define other DEAP components and settings
+    toolbox.register("mate", gp.cxOnePoint)
+    toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
+    toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.9, fitness_first=True)
+    toolbox.register("evaluate", evaluate_individual, X=X, y=y)
+    
+    def feasible(individual):
+        """Feasibility function for the individual. Returns True if feasible False
+        otherwise."""
+        if len(gp.PrimitiveTree(individual)) <= 10:
+            return True
+        return False
+
+    def distance(individual):
+        """A distance function to the feasibility region."""
+        complexity = len(gp.PrimitiveTree(individual))
+        return 0 if complexity <= 10 else (complexity - 10)**2
+    
+    toolbox.decorate("evaluate", tools.DeltaPenalty(feasible, np.inf, distance))
+    
+    pop = toolbox.population(n=10)
+    best_loss = np.inf
+    best_individual = None
+    best_func = None
+    
+    # Run the evolutionary algorithm
+    try:
+        while True:
+            # Run one generation of the algorithm
+            algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=1, stats=None, verbose = False)
             
-        # Define fitness function (minimize the loss)
-        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-        creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
-        
-        def evaluate_individual(individual, X, y):
+            # Calculate the loss value of the best individual
+            individual = tools.selBest(pop, k=1)[0]
             func = gp.compile(individual, pset)
-            y_pred = np.array([func(x) for x in X])
-            loss = custom_loss(y_pred, y)
-            return loss,
+            try:
+                y_pred = func(X)
+                y_pred = y_pred.flatten()
+            except:
+                if isinstance(y_pred, float):
+                    y_pred = np.full_like(X, fill_value = y_pred)
+                else:
+                    print(func(X), type(func(X)), X.shape)
+                    print("Exiting...")
+                    exit()
+            loss = np.sum((y_pred-y)**2)
             
-        toolbox = base.Toolbox()
-        toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
-        toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
-        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+            if loss < best_loss:
+                best_loss = loss
+                best_individual = individual
+                best_func = func
+                print(f"New Best Loss = {best_loss}")
+                print("Best individual:", best_individual)
+                print("Complexity =",len(gp.PrimitiveTree(individual)))
+    except KeyboardInterrupt:
+        x_start = X[0]
+        x_end = X[-1]
+        x_points = np.linspace(x_start, x_end, 1000)
+        
+        ARG0 = sp.symbols('ARG0')
+        expr = sp.sympify(str(best_individual))
+        expr = sp.latex(expr)
+        
+        floats = [float(i) for i in re.findall(r"\d+\.\d+",expr)]
+        non_floats = re.split(r"\d+\.\d+",expr)
+        
+        new_expr = ""
+        length = min(len(floats), len(non_floats))
+        
+        float_start_idx = expr.index(str(floats[0]))
+        non_float_start_idx = expr.index(str(non_floats[0]))
 
-        # Define other DEAP components and settings
-        toolbox.register("mate", gp.cxOnePoint)
-        toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
-        toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.9, fitness_first=True)
-        toolbox.register("evaluate", evaluate_individual, X=X, y=y)
+        if (non_float_start_idx < float_start_idx): #Then it starts with non float
+            for i in range(length):
+                new_expr += non_floats[i] + f"{floats[i]:0.3f}"
+            new_expr += non_floats[-1]
+        else: #Then it starts with float
+            for i in range(length):
+                new_expr += f"{floats[i]:0.3f}" + non_floats[i]
+            new_expr += f"{floats[-1]:0.3f}"
         
-        pop = toolbox.population(n=100)
-        best_loss = np.inf
-        best_individual = None
-        best_func = None
-        
-        # Run the evolutionary algorithm
-        try:
-            while True:
-                # Run one generation of the algorithm
-                algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=100, stats=None, verbose = False)
-                
-                # Calculate the loss value of the best individual
-                individual = tools.selBest(pop, k=1)[0]
-                func = gp.compile(individual, pset)
-                y_pred = func(X).flatten()
-                loss = np.sum((y_pred-y)**2)
-                
-                if loss < best_loss:
-                    best_loss = loss
-                    best_individual = individual
-                    best_func = func
-                    print(f"New Best Loss = {best_loss}")
-                    print("Best individual:", best_individual)
-        except KeyboardInterrupt:
-            x_start = X[0]
-            x_end = X[-1]
-            x_points = np.linspace(x_start, x_end, 1000)
-            
-            ARG0 = sp.symbols('ARG0')
-            expr = sp.sympify(str(best_individual))
-            expr = sp.latex(expr)
-            
-            plt.plot(x_points, best_func(x_points),
-                     label=rf"f(x) = ${expr}$")
-            plt.legend()
-            # Save the figure and show your friends! :)
-            plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
+        plt.plot(x_points, best_func(x_points),
+                 label=rf"f(x) = ${new_expr}$")
+        plt.legend()
+        # Save the figure and show your friends! :)
+        plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
