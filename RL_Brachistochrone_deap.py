@@ -41,7 +41,7 @@ from operator import add, sub, mul
 from deap import base, creator, tools, gp, algorithms
 from math import isclose
 import random
-
+import argparse
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
 
@@ -587,7 +587,10 @@ def build_agent(env, actor, critic, action_input):
 
 
 if __name__ == '__main__':
-    run_only_Sr = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_only_SR", action="store_true", help="Run only SR")
+    args = parser.parse_args()
+    run_only_Sr = args.run_only_SR
 
     if not run_only_Sr:
         x_start, x_end, = 0, np.pi  # starting and ending x coordinates
@@ -647,9 +650,9 @@ if __name__ == '__main__':
         plt.plot(X, y, label=f"Time Taken = {test.best_t:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
 
-        np.savetxt("RL_Brachistochrone.txt", np.concatenate(
+        np.savetxt("RL_Brachistochrone_deap.txt", np.concatenate(
             (np.expand_dims(X, axis=1), np.expand_dims(y, axis=1)), axis=1))
-        np.savetxt("RL_Brachistochrone_best_time.txt", np.array([test.best_t]))
+        np.savetxt("RL_Brachistochrone_deap_best_time.txt", np.array([test.best_t]))
 
         # Symbolic Regression
         # ===================
@@ -684,7 +687,6 @@ if __name__ == '__main__':
             func = gp.compile(individual, pset)
             y_pred = np.array([func(x) for x in X])
             loss = custom_loss(y_pred, y)
-            print(loss)
             return loss,
             
         toolbox = base.Toolbox()
@@ -699,25 +701,134 @@ if __name__ == '__main__':
         toolbox.register("evaluate", evaluate_individual, X=X, y=y)
         
         pop = toolbox.population(n=100)
-        algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=500, stats=None)
-
-        best_individual = tools.selBest(pop, k=1)[0]
-        best_func = gp.compile(best_individual, pset)
-        y_pred = np.array([best_func(x) for x in X])
-        best_loss = np.sum((y_pred-y)**2)
-
-        print("Best individual:", best_individual)
-        print("Best func", best_func, type(best_func))
-        print("Best loss:", best_loss)
-
-        x_points = np.linspace(x_start, x_end, 1000)
+        best_loss = np.inf
+        best_individual = None
+        best_func = None
         
-        ARG0 = sp.symbols('ARG0')
-        expr = sp.sympify(str(best_individual))
-        expr = sp.latex(expr)
+        # Run the evolutionary algorithm
+        try:
+            while True:
+                # Run one generation of the algorithm
+                algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=100, stats=None, verbose = False)
+                
+                # Calculate the loss value of the best individual
+                individual = tools.selBest(pop, k=1)[0]
+                func = gp.compile(individual, pset)
+                y_pred = func(X).flatten()
+                
+                loss = np.sum((y_pred-y)**2)
+                
+                if loss < best_loss:
+                    best_loss = loss
+                    best_individual = individual
+                    best_func = func
+                    print(f"New Best Loss = {best_loss}")
+                    print("Best individual:", best_individual)
+        except KeyboardInterrupt:
+            x_points = np.linspace(x_start, x_end, 1000)
+            
+            ARG0 = sp.symbols('ARG0')
+            expr = sp.sympify(str(best_individual))
+            expr = sp.latex(expr)
+#            print(expr)
+            plt.plot(x_points, best_func(x_points),
+                     label=rf"f(x) = ${expr}$")
+            plt.legend()
+            # Save the figure and show your friends! :)
+            plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
+
+    else:  # If symbolic regression didn't go well and you want to redo it
+        best_vals = np.loadtxt("RL_Brachistochrone_deap.txt")
+#        best_vals = np.loadtxt("train_data_25p.csv", delimiter=',')
+        X = best_vals[:, 0]
+        y = best_vals[:, 1]
+#        X = best_vals[0]
+#        y = best_vals[1]
+        x_points, y_points, optimal_time = BrachistohronePoints(
+            (X[0], y[0]), (X[-1], y[-1]))
+        plt.plot(x_points, y_points,
+                 label=f"Best Time = {optimal_time:0.3f} seconds")
+        best_t = np.loadtxt("RL_Brachistochrone_deap_best_time.txt")
+        plt.plot(X, y, label=f"Time Taken = {best_t:.3f} seconds")
+        plt.scatter((X[0], X[-1]), (y[0], y[-1]))
+        X = X.reshape(-1, 1)
+
+                # Define custom operators and unary functions
+        pset = gp.PrimitiveSet("main", 1)
+        pset.addPrimitive(operator.add, 2)
+        pset.addPrimitive(operator.sub, 2)
+        pset.addPrimitive(operator.mul, 2)
+        pset.addPrimitive(np.sin, 1)
+        pset.addPrimitive(np.cos, 1)
         
-        plt.plot(x_points, best_func(x_points),
-                 label=rf"f(x) = ${expr}$")
-        plt.legend()
-        # Save the figure and show your friends! :)
-        plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
+        pset.addEphemeralConstant("const", lambda: random.uniform(-1, 1))
+        def inv(x):
+            x = np.array(x)
+            return 1/x if np.all(x) else x
+        pset.addPrimitive(inv, 1)
+        
+        # Define custom loss function
+        def custom_loss(y_pred, y):
+            if np.allclose(y_pred, y_pred[0]):
+                return np.inf
+            loss = np.sum((y_pred - y) ** 2)
+            return loss
+            
+        # Define fitness function (minimize the loss)
+        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+        creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
+        
+        def evaluate_individual(individual, X, y):
+            func = gp.compile(individual, pset)
+            y_pred = np.array([func(x) for x in X])
+            loss = custom_loss(y_pred, y)
+            return loss,
+            
+        toolbox = base.Toolbox()
+        toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
+        toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
+        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+
+        # Define other DEAP components and settings
+        toolbox.register("mate", gp.cxOnePoint)
+        toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
+        toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.9, fitness_first=True)
+        toolbox.register("evaluate", evaluate_individual, X=X, y=y)
+        
+        pop = toolbox.population(n=100)
+        best_loss = np.inf
+        best_individual = None
+        best_func = None
+        
+        # Run the evolutionary algorithm
+        try:
+            while True:
+                # Run one generation of the algorithm
+                algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=100, stats=None, verbose = False)
+                
+                # Calculate the loss value of the best individual
+                individual = tools.selBest(pop, k=1)[0]
+                func = gp.compile(individual, pset)
+                y_pred = func(X).flatten()
+                loss = np.sum((y_pred-y)**2)
+                
+                if loss < best_loss:
+                    best_loss = loss
+                    best_individual = individual
+                    best_func = func
+                    print(f"New Best Loss = {best_loss}")
+                    print("Best individual:", best_individual)
+        except KeyboardInterrupt:
+            x_start = X[0]
+            x_end = X[-1]
+            x_points = np.linspace(x_start, x_end, 1000)
+            
+            ARG0 = sp.symbols('ARG0')
+            expr = sp.sympify(str(best_individual))
+            expr = sp.latex(expr)
+            
+            plt.plot(x_points, best_func(x_points),
+                     label=rf"f(x) = ${expr}$")
+            plt.legend()
+            # Save the figure and show your friends! :)
+            plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)

@@ -37,7 +37,7 @@ from gym import Env
 from gym.spaces import Box
 from pysr import PySRRegressor
 from math import isclose
-
+import argparse
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
 
@@ -583,7 +583,10 @@ def build_agent(env, actor, critic, action_input):
 
 
 if __name__ == '__main__':
-    run_only_Sr = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_only_SR", action="store_true", help="Run only SR")
+    args = parser.parse_args()
+    run_only_Sr = args.run_only_SR
 
     if not run_only_Sr:
         x_start, x_end, = 0, np.pi  # starting and ending x coordinates
@@ -681,7 +684,7 @@ if __name__ == '__main__':
         plt.legend()
         # Save the figure and show your friends! :)
         plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
-        print("Best loss:", np.sum((model_selection(X)-y)**2))
+        print("Best loss:", np.sum((model_selection(X).flatten()-y)**2))
 
     else:  # If symbolic regression didn't go well and you want to redo it
         best_vals = np.loadtxt("RL_Brachistochrone.txt")
@@ -734,4 +737,4 @@ if __name__ == '__main__':
         plt.legend()
         # Save the figure and show your friends! :)
         plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
-        print("Best loss:", np.sum((model_selection(X)-y)**2))
+        print("Best loss:", np.sum((model_selection(X).flatten()-y)**2))
