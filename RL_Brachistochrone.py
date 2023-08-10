@@ -661,7 +661,7 @@ if __name__ == '__main__':
         plt.plot(x_points, y_points,
                  label=f"Best Time = {optimal_time:0.3f} seconds")
         best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
-        plt.plot(X, y, label=f"Time Taken = {1.029:.3f} seconds")
+        plt.plot(X, y, label=f"Time Taken = {best_t:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
 
     # Symbolic Regression
