@@ -681,7 +681,7 @@ if __name__ == '__main__':
     def pow(base, power):
         try:
             result = abs(base)**power
-        except OverflowError:
+        except (OverflowError, ZeroDivisionError):
             return np.inf
         else:
             return result
@@ -721,7 +721,8 @@ if __name__ == '__main__':
     # Define other DEAP components and settings
     toolbox.register("mate", gp.cxOnePointLeafBiased, termpb=0.1)
     toolbox.register("mutate", gp.mixedMutate, expr=toolbox.expr, pset=pset, prob = [1, 0, 0])
-    toolbox.register("select", tools.selDoubleTournament, fitness_size=3, parsimony_size=1.4, fitness_first=True)
+    toolbox.register("select", tools.selDoubleTournament, fitness_size=2, parsimony_size=1.4, fitness_first=True)
+#    toolbox.register("select", tools.selStochasticTournament, tournsize=3, prob = [1/3, 1/3, 1/3])
 #    toolbox.register("select", tools.selSPEA2)
     toolbox.register("evaluate", evaluate_individual, X=X, y=y)
     
@@ -753,7 +754,9 @@ if __name__ == '__main__':
     try:
         while True:
             # Run one generation of the algorithm
-            algorithms.eaSimple(pop, toolbox, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, verbose = False)
+            algorithms.eaSimple(pop, toolbox, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, verbose = False, halloffame=tools.ParetoFront())
+            
+#            algorithms.eaMuCommaLambda(pop, toolbox, mu=50, lambda_=100, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, halloffame=tools.ParetoFront(), verbose=False)
             
             # Calculate the loss value of the best individual
             individual = tools.selBest(pop, k=1)[0]
@@ -762,15 +765,15 @@ if __name__ == '__main__':
             try:
                 y_pred = func(X)
                 y_pred = y_pred.flatten()
-            except:
+            except Exception as e:
                 if isinstance(y_pred, float):
                     y_pred = np.full_like(X, fill_value = y_pred)
                 elif isinstance(y_pred, complex):
                     y_pred = np.full_like(X, fill_value = 1)
                 else:
                     print(func(X), type(func(X)), X.shape)
-                    print("Exiting...")
-                    exit()
+                    print(f"\n\nAn exception of type {e.__class__.__name__} was raised and caught\n")
+            
             loss = np.sum((y_pred-y)**2)
             
             if loss < best_loss:
@@ -814,6 +817,6 @@ if __name__ == '__main__':
                  label=rf"f(x) = ${new_expr}$")
         plt.legend()
         # Save the figure and show your friends! :)
-        if best_loss < 8.337045599793958:
+        if best_loss < 2.856981147815164:
             print("New best")
             plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
