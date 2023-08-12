@@ -706,12 +706,6 @@ if __name__ == '__main__':
     # Define fitness function (minimize the loss)
     creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
     creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
-    
-    def evaluate_individual(individual, X, y):
-        func = gp.compile(individual, pset)
-        y_pred = np.array([func(x) for x in X])
-        loss = custom_loss(y_pred, y)
-        return loss,
         
     toolbox = base.Toolbox()
     toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
@@ -724,6 +718,12 @@ if __name__ == '__main__':
     toolbox.register("select", tools.selDoubleTournament, fitness_size=2, parsimony_size=1.4, fitness_first=True)
 #    toolbox.register("select", tools.selStochasticTournament, tournsize=3, prob = [1/3, 1/3, 1/3])
 #    toolbox.register("select", tools.selSPEA2)
+    def evaluate_individual(individual, X, y):
+        func = gp.compile(individual, pset)
+        y_pred = np.array([func(x) for x in X])
+        loss = custom_loss(y_pred, y)
+        return loss,
+
     toolbox.register("evaluate", evaluate_individual, X=X, y=y)
     
     def feasible(individual):
@@ -745,7 +745,7 @@ if __name__ == '__main__':
 #    https://deap.readthedocs.io/en/master/tutorials/advanced/constraints.html
     toolbox.decorate("evaluate", tools.DeltaPenalty(feasible, np.inf, distance))
     
-    pop = toolbox.population(n=10)
+    pop = toolbox.population(n=100)
     best_loss = np.inf
     best_individual = None
     best_func = None
@@ -757,7 +757,7 @@ if __name__ == '__main__':
             algorithms.eaSimple(pop, toolbox, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, verbose = False, halloffame=tools.ParetoFront())
             
 #            algorithms.eaMuCommaLambda(pop, toolbox, mu=50, lambda_=100, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, halloffame=tools.ParetoFront(), verbose=False)
-            
+                        
             # Calculate the loss value of the best individual
             individual = tools.selBest(pop, k=1)[0]
     
