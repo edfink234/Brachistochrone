@@ -15,11 +15,10 @@ non-parametric form of the Brachistochrone
 # if hasattr(critic.output, '__len__') and len(critic.output) > 1: -> if
 # hasattr(critic.output, '__shape__') and len(critic.output) > 2:
 
-import sys
-sys.setrecursionlimit(10000)
 import warnings
-import sympy as sp
-from sympy import sin, cos
+import sys
+from sympy.utilities.lambdify import lambdify
+from sympy import symbols
 from rl.memory import SequentialMemory
 from rl.policy import BoltzmannQPolicy
 from rl.agents import DDPGAgent
@@ -33,16 +32,12 @@ from time import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from scipy.optimize import ridder, fsolve, curve_fit
+from scipy.optimize import ridder, fsolve
 from gym import Env
 from gym.spaces import Box
-import operator
-from operator import add, sub, mul
-from deap import base, creator, tools, gp, algorithms
+from pysr import PySRRegressor
 from math import isclose
-import random
 import argparse
-import re
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
 
@@ -586,13 +581,6 @@ def build_agent(env, actor, critic, action_input):
                      memory=memory, batch_size=32)
     return ddpg
 
-def is_float(string):
-    try:
-        float(string)
-        return True
-    except ValueError:
-        return False
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -658,12 +646,11 @@ if __name__ == '__main__':
         plt.plot(X, y, label=f"Time Taken = {test.best_t:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
 
-        np.savetxt("RL_Brachistochrone_deap.txt", np.concatenate(
+        np.savetxt("RL_Brachistochrone.txt", np.concatenate(
             (np.expand_dims(X, axis=1), np.expand_dims(y, axis=1)), axis=1))
-        np.savetxt("RL_Brachistochrone_deap_best_time.txt", np.array([test.best_t]))
-
+        np.savetxt("RL_Brachistochrone_best_time.txt", np.array([test.best_t]))
     else:  # If symbolic regression didn't go well and you want to redo it
-        best_vals = np.loadtxt("RL_Brachistochrone_deap.txt")
+        best_vals = np.loadtxt("RL_Brachistochrone.txt")
 #        best_vals = np.loadtxt("train_data_25p.csv", delimiter=',')
         X = best_vals[:, 0]
         y = best_vals[:, 1]
@@ -673,226 +660,44 @@ if __name__ == '__main__':
             (X[0], y[0]), (X[-1], y[-1]))
         plt.plot(x_points, y_points,
                  label=f"Best Time = {optimal_time:0.3f} seconds")
-        best_t = np.loadtxt("RL_Brachistochrone_deap_best_time.txt")
+        best_t = np.loadtxt("RL_Brachistochrone_best_time.txt")
         plt.plot(X, y, label=f"Time Taken = {best_t:.3f} seconds")
         plt.scatter((X[0], X[-1]), (y[0], y[-1]))
-    
+
     # Symbolic Regression
     # ===================
+    # Code Taken from Here: https://github.com/MilesCranmer/PySR
+
     X = X.reshape(-1, 1)
-    # Define custom operators and unary functions
-    pset = gp.PrimitiveSet("main", 1)
-    def init_pset(pset, addConst: bool = True):
-        pset.addPrimitive(operator.add, 2)
-        pset.addPrimitive(operator.sub, 2)
-        pset.addPrimitive(operator.mul, 2)
-        def pow(base, power):
-            try:
-                result = abs(base)**power
-            except (OverflowError, ZeroDivisionError):
-                return np.inf
-            else:
-                return result
-        pset.addPrimitive(pow, 2)
-        pset.addPrimitive(np.sin, 1)
-        pset.addPrimitive(np.cos, 1)
-        if addConst:
-            pset.addEphemeralConstant("const", lambda: random.uniform(-10, 10))
-        def inv(x):
-            x = np.array(x)
-            return 1/x if np.all(x) else x
-        pset.addPrimitive(inv, 1)
-    init_pset(pset)
-    # Define custom loss function
-    def custom_loss(y_pred, y):
-        if np.allclose(y_pred, y_pred[0]):
-            return np.inf
-        loss = np.sum((y_pred - y) ** 2)
-        return loss
-        
-    # Define fitness function (minimize the loss)
-    creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-    creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
-        
-    toolbox = base.Toolbox()
-    toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
-    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+    model = PySRRegressor(
+        niterations=500,  # < Increase me for better results
+        binary_operators=["+", "-", "*"],
+        unary_operators=[
+            "cos",
+            #        "exp",
+            "sin",
+            "inv(x) = 1/x",
+            # ^ Custom operator (julia syntax)
+        ],
+        extra_sympy_mappings={"inv": lambda x: 1 / x},
+        # ^ Define operator for SymPy as well
+        loss="loss(x, y) = (x - y)^2",
+        nested_constraints = {"sin": {"cos": 0, "sin": 0}, "cos": {"cos": 0, "sin": 0}}
+        # ^ Custom loss function (julia syntax)
+    )
+    model.fit(X, y)
+    print(model.latex())
+    print(model.sympy())
+    model_selection = lambdify(symbols('x0'), model.sympy())
 
-    # Define other DEAP components and settings
-    toolbox.register("mate", gp.cxOnePointLeafBiased, termpb=0.1)
-    toolbox.register("mutate", gp.mixedMutate, expr=toolbox.expr, pset=pset, prob = [1, 0, 0])
-    toolbox.register("select", tools.selDoubleTournament, fitness_size=2, parsimony_size=1.4, fitness_first=True)
-#    toolbox.register("select", tools.selStochasticTournament, tournsize=3, prob = [1/3, 1/3, 1/3])
-#    toolbox.register("select", tools.selSPEA2)
-    def evaluate_individual(individual, X, y):
-        func = gp.compile(individual, pset)
-        y_pred = np.array([func(x) for x in X])
-        loss = custom_loss(y_pred, y)
-        return loss,
-    
-    def optimize_individual(individual, X, y, pset):
-        constants = []
-        individual_string = str(individual)
-        for i in individual:
-            if is_float(i.name):
-                constants.append(i.name)
-        
-        arity = 1
-        for i in constants:
-            ArgString = f"ARG{arity}"
-            individual_string = individual_string.replace(i, ArgString)
-            arity+=1
-
-        temp_pset = gp.PrimitiveSet("temp_main", arity)
-        init_pset(temp_pset, False)
-        temp_individual = creator.Individual.from_string(individual_string, temp_pset)
-        temp_func = gp.compile(temp_individual, temp_pset)
-        
-        func = gp.compile(individual, pset)
-        y_pred = np.array([func(x) for x in X])
-        loss = custom_loss(y_pred, y)
-        assert(len(constants) == arity-1)
-        if constants:
-            try:
-                
-#                parameters, covariance = curve_fit(temp_func, X.flatten(), y, p0 = (arity-1)*[1])
-#                print(constants, type(constants))
-                parameters, covariance = curve_fit(temp_func, X.flatten(), y, p0 = [float(i) for i in constants])
-                if "nan" in str(parameters):
-                    raise RuntimeError
-                arity = 1
-                for i in parameters:
-                    ArgString = f"ARG{arity}"
-                    individual_string = individual_string.replace(ArgString, f"{i}")
-                    arity+=1
-                if "ARG0" in individual_string:
-                    temp_pset = gp.PrimitiveSet("temp_main", 1)
-                    init_pset(temp_pset, False)
-                    temp_individual = creator.Individual.from_string(individual_string, temp_pset)
-                    temp_func = gp.compile(temp_individual, temp_pset)
-                    y_pred = np.array([temp_func(x) for x in X])
-                else:
-                    temp_pset = gp.PrimitiveSet("temp_main", 0)
-                    init_pset(temp_pset, False)
-                    temp_individual = creator.Individual.from_string(individual_string, temp_pset)
-                    temp_func = gp.compile(temp_individual, temp_pset)
-                    y_pred = np.array([temp_func for x in X])
-                    
-                
-                
-
-                loss = custom_loss(y_pred.flatten(), y.flatten())
-                individual = temp_individual
-            except RuntimeError:
-                return loss, individual
-
-        return loss, individual
-
-    toolbox.register("evaluate", evaluate_individual, X=X, y=y)
-    
-    def feasible(individual):
-        """Feasibility function for the individual. Returns True if feasible False
-        otherwise."""
-        tree = gp.PrimitiveTree(individual)
-        if len(tree) <= 9 and tree.height <= 2:
-            return True
-        return False
-    
-    def distance(individual):
-        """A distance function to the feasibility region."""
-        tree = gp.PrimitiveTree(individual)
-        complexity = len(tree)
-        height = tree.height
-        return 0 if complexity <= 9 and height <= 2 else (complexity - 9)**2 + (height - 2)**2
-    
-#    https://deap.readthedocs.io/en/master/tutorials/advanced/constraints.html
-    toolbox.decorate("evaluate", tools.DeltaPenalty(feasible, np.inf, distance))
-    
-    pop = toolbox.population(n=100)
-    best_loss = np.inf
-    best_individual = None
-    best_func = None
-        
-    # Run the evolutionary algorithm
-    try:
-        while True:
-            # Run one generation of the algorithm
-            algorithms.eaSimple(pop, toolbox, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, verbose = False, halloffame=tools.ParetoFront())
-            
-#            algorithms.eaMuCommaLambda(pop, toolbox, mu=50, lambda_=100, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, halloffame=tools.ParetoFront(), verbose=False)
-                        
-            # Calculate the loss value of the best individual
-            individual = tools.selBest(pop, k=1)[0]
-    
-            func = gp.compile(individual, pset)
-            try:
-                y_pred = func(X)
-                y_pred = y_pred.flatten()
-            except Exception as e:
-                if isinstance(y_pred, float):
-                    y_pred = np.full_like(X, fill_value = y_pred)
-                elif isinstance(y_pred, complex):
-                    y_pred = np.full_like(X, fill_value = 1)
-                else:
-                    print(func(X), type(func(X)), X.shape)
-                    print(f"\n\nAn exception of type {e.__class__.__name__} was raised and caught\n")
-            
-            loss = np.sum((y_pred-y)**2)
-            
-            if loss < best_loss:
-                best_loss = loss
-                best_individual = individual
-                best_func = func
-                test_loss, individual = optimize_individual(individual, X, y, pset)
-                if test_loss < best_loss:
-                    pop[pop.index(best_individual)] = individual
-                    print("best_loss = %.2f, test_loss = %.2f"%(best_loss, test_loss))
-                    print(f"best_individual = {best_individual}, test_individual = {individual}")
-                    best_individual = individual
-
-                    best_loss = test_loss
-                print(f"New Best Loss = {best_loss}")
-                print("Best individual:", best_individual)
-                print("Complexity =",len(gp.PrimitiveTree(best_individual)))
-                print("Height =",gp.PrimitiveTree(best_individual).height)
-                
-#without optimize: [37.859226569028905, 35.1214099876172, 43.81847922442325, 52.860711676426305, 34.80585717962242]
-#with optimize: [34.231363176126585, 33.193049785343156, 34.23136317612658, 34.231363176126585, 34.23136317615006]
-
-                
-    except KeyboardInterrupt:
-        print(f"Best Loss = {best_loss}")
-        x_start = X[0]
-        x_end = X[-1]
-        x_points = np.linspace(x_start, x_end, 1000)
-        
-        ARG0 = sp.symbols('ARG0')
-        expr = sp.sympify(str(best_individual))
-        expr = sp.latex(expr)
-        
-        floats = [float(i) for i in re.findall(r"\d+\.\d+",expr)]
-        non_floats = re.split(r"\d+\.\d+",expr)
-        
-        new_expr = ""
-        length = min(len(floats), len(non_floats))
-        
-        float_start_idx = expr.index(str(floats[0]))
-        non_float_start_idx = expr.index(str(non_floats[0]))
-
-        if (non_float_start_idx < float_start_idx): #Then it starts with non float
-            for i in range(length):
-                new_expr += non_floats[i] + f"{floats[i]:0.3f}"
-            new_expr += non_floats[-1]
-        else: #Then it starts with float
-            for i in range(length):
-                new_expr += f"{floats[i]:0.3f}" + non_floats[i]
-            new_expr += f"{floats[-1]:0.3f}"
-        
-        plt.plot(x_points, best_func(x_points),
-                 label=rf"f(x) = ${new_expr}$")
-        plt.legend()
-        # Save the figure and show your friends! :)
-        if best_loss < 1.143478788005876:
-            print("New best")
-            plt.savefig("RL_Brachistochrone_deap.png", dpi=5 * 96)
+#    x_points = np.linspace(10**x_start, 10**x_end, 1000)
+    x_start = X[0]
+    x_end = X[-1]
+    x_points = np.linspace(x_start, x_end, 1000)
+    plt.title(f"Number of Sampled Points = {len(X)}")
+    plt.plot(x_points, model_selection(x_points),
+             label=rf"f(x) = ${model.latex()}$")
+    plt.legend()
+    # Save the figure and show your friends! :)
+    plt.savefig("RL_Brachistochrone.png", dpi=5 * 96)
+    print("Best loss:", np.sum((model_selection(X).flatten()-y)**2))
