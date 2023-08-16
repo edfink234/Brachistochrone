@@ -723,13 +723,148 @@ if __name__ == '__main__':
     toolbox.register("mate", gp.cxOnePointLeafBiased, termpb=0.1)
     toolbox.register("mutate", gp.mixedMutate, expr=toolbox.expr, pset=pset, prob = [1, 0, 0])
     toolbox.register("select", tools.selDoubleTournament, fitness_size=2, parsimony_size=1.4, fitness_first=True)
-#    toolbox.register("select", tools.selStochasticTournament, tournsize=3, prob = [1/3, 1/3, 1/3])
-#    toolbox.register("select", tools.selSPEA2)
-    def evaluate_individual(individual, X, y):
-        func = gp.compile(individual, pset)
-        y_pred = np.array([func(x) for x in X])
-        loss = custom_loss(y_pred, y)
-        return loss,
+
+    # Define the neural network class (simplified example)
+    class NeuralNetwork:
+        def __init__(self):
+            self.weights = np.random.randn(input_size, output_size)
+        
+        def predict(self, state):
+            return np.dot(state, self.weights)
+
+    # Define the environment (simplified example)
+    class Environment:
+        def __init__(self):
+            self.state_size = 10
+            self.action_size = 5
+        
+        def get_initial_state(self):
+            return np.random.rand(self.state_size)
+        
+        def step(self, state, action):
+            new_state = state + action
+            reward = np.sum(new_state)
+            done = False
+            return new_state, reward, done
+
+    # Define the Monte Carlo Tree Search (MCTS) function
+    # Rewrite the mcts function so that it searches for all possible symbolic expressions given a deap.base.Toolbox object,
+#    a poulation of individuals
+
+    def mcts(toolbox, population, num_simulations):
+        root = Node(random.choice(population))  # Start from a random individual
+
+        for _ in range(num_simulations):
+            node = root
+            while not node.is_terminal():
+                if not node.is_fully_expanded():
+                    action = node.get_untried_action()
+                    next_expression = toolbox.mutate(node.expression)
+                    node = node.expand(action, next_expression)
+                else:
+                    action, node = node.select_best_child(neural_network)
+
+            simulated_value = node.simulate_random_playout()
+            node.backpropagate(simulated_value)
+
+        best_action = root.select_best_action()
+        return best_action
+
+    # Usage example
+    # Define your symbolic expression manipulation toolbox and population
+    # Define your neural network for evaluating expressions (if needed)
+    # Call the mcts function with the appropriate inputs
+
+
+    class Node:
+        def __init__(self, state):
+            self.state = state
+            self.actions = list(range(env.action_size))
+            self.children = {}
+            self.visits = 0
+            self.total_reward = 0
+        
+        def is_terminal(self):
+            return self.visits >= max_simulation_steps
+        
+        def is_fully_expanded(self):
+            return len(self.children) == len(self.actions)
+        
+        def get_untried_action(self):
+            untried_actions = [a for a in self.actions if a not in self.children]
+            return random.choice(untried_actions)
+        
+        def expand(self, action, next_state):
+            new_node = Node(next_state)
+            self.children[action] = new_node
+            return new_node
+        
+        def select_best_child(self, neural_network):
+            best_child = None
+            best_ucb = float('-inf')
+            for action, child in self.children.items():
+                exploration_term = C * np.sqrt(np.log(self.visits) / (1 + child.visits))
+                exploitation_term = neural_network.predict(child.state)[0]  # Replace with actual network evaluation
+                ucb_value = exploitation_term + exploration_term
+                if ucb_value > best_ucb:
+                    best_ucb = ucb_value
+                    best_child = child
+            return action, best_child
+        
+        def simulate_random_playout(self, env):
+            state = self.state
+            total_reward = 0
+            for _ in range(max_simulation_steps):
+                action = random.choice(self.actions)
+                next_state, reward, done = env.step(state, action)
+                total_reward += reward
+                if done:
+                    break
+                state = next_state
+            return total_reward
+        
+        def backpropagate(self, reward):
+            self.visits += 1
+            self.total_reward += reward
+            if self.parent is not None:
+                self.parent.backpropagate(reward)
+        
+        def select_best_action(self):
+            best_action = None
+            best_visits = 0
+            for action, child in self.children.items():
+                if child.visits > best_visits:
+                    best_visits = child.visits
+                    best_action = action
+            return best_action
+
+    # Define the evaluate_individual function
+    def evaluate_individual(individual, pop):
+        neural_network = NeuralNetwork()
+        total_reward = 0
+        for _ in range(num_games_per_evaluation):
+            print("hi")
+            state = env.get_initial_state()
+            for _ in range(max_game_steps):
+                action = mcts(pop, neural_network, num_simulations)
+                next_state, reward, done = env.step(state, action)
+                total_reward += reward
+                if done:
+                    break
+                state = next_state
+        return total_reward / num_games_per_evaluation,
+
+    # Global settings
+    input_size = 10
+    output_size = 5
+    C = 1.0
+    max_simulation_steps = 10
+    max_game_steps = 20
+    num_simulations = 50
+    num_games_per_evaluation = 5
+
+    # Create environment
+    env = Environment()
     
     def optimize_individual(individual, X, y, pset):
         constants = []
@@ -783,7 +918,7 @@ if __name__ == '__main__':
 
         return loss, individual
 
-    toolbox.register("evaluate", evaluate_individual, X=X, y=y)
+    toolbox.register("evaluate", evaluate_individual, pop = pop)
     
     def feasible(individual):
         """Feasibility function for the individual. Returns True if feasible False
@@ -812,19 +947,12 @@ if __name__ == '__main__':
     try:
         while True:
             # Run one generation of the algorithm
+
             algorithms.eaSimple(pop, toolbox, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, verbose = False)
 #            algorithms.eaMuCommaLambda(pop, toolbox, mu=50, lambda_=100, cxpb=0.2, mutpb=0.5, ngen=1, stats=None, halloffame=tools.ParetoFront(), verbose=False)
                         
             # Calculate the loss value of the best individual
             individual = tools.selBest(pop, k=1)[0]
-            if np.random.random() < 0.1:
-                test_loss, test_individual = optimize_individual(individual, X, y, pset)
-                if test_loss < best_loss:
-                    print("best_loss = %.2f, test_loss = %.2f"%(best_loss, test_loss))
-                    print(f"best_individual = {best_individual}, test_individual = {individual}")
-                    pop[pop.index(individual)] = test_individual
-                    best_individual = test_individual
-                    best_loss = test_loss
     
             func = gp.compile(individual, pset)
             try:

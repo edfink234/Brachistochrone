@@ -12,8 +12,7 @@ non-parametric form of the Brachistochrone
 # /Users/edwardfinkelstein/MachineLearning/myvenv/lib/python3.9/site-packages/keras/engine/training_utils_v1.py -> Commented out line 711-721
 # /Users/edwardfinkelstein/MachineLearning/myvenv/lib/python3.9/site-packages/rl/agents/ddpg.py: comment out everything line that has uses_learning_phase (except lines 80-82), i.e., lines 153-154, 310-311
 # if hasattr(actor.output, '__len__') and len(actor.output) > 1: -> if hasattr(actor.output, '__shape__') and len(actor.output) > 2:
-# if hasattr(critic.output, '__len__') and len(critic.output) > 1: -> if
-# hasattr(critic.output, '__shape__') and len(critic.output) > 2:
+# if hasattr(critic.output, '__len__') and len(critic.output) > 1: -> if hasattr(critic.output, '__shape__') and len(critic.output) > 2:
 
 import warnings
 import sys
