@@ -727,7 +727,7 @@ if __name__ == '__main__':
                     best_model_selection = lambdify(x, expr)
                     print("New best expression:", best_expr)
         except KeyboardInterrupt:
-            if best_loss < 0.06550575070015369:
+            if best_loss < 0.0371831001264783:
                 y_points = best_model_selection(x_points)
                 if isinstance(y_points, float):
                     y_points = np.full_like(x_points, fill_value = y_points)

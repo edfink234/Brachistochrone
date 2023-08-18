@@ -39,8 +39,8 @@ class SymbolicLayer:
         self.n_funcs = len(funcs)           # Number of activation functions (and number of layer outputs)
         self.funcs = [func.tf for func in funcs]        # Convert functions to list of Tensorflow functions
         self.n_double = functions.count_double(funcs)   # Number of activation functions that take 2 inputs
-        self.n_single = functions.count_single(funcs)    # Number of activation functions that take 1 input
-
+        self.n_single = functions.count_single(funcs)   # Number of activation functions that take 1 input
+        self.n_N = functions.count_N(funcs)             # Number of activation functions that take N inputs
         self.out_dim = self.n_funcs + self.n_double
 
     def build(self, in_dim):
@@ -248,9 +248,16 @@ class SymbolicLayerL0(SymbolicLayer):
                 in_i += 1
                 out_i += 1
             # Apply functions that take 2 inputs and produce 1 output
-            while out_i < self.n_funcs:
+            while out_i < self.n_single + self.n_double:
                 self.output.append(self.funcs[out_i](h[:, in_i], h[:, in_i+1]))
                 in_i += 2
+                out_i += 1
+            # Apply functions that take N inputs and produce 1 output
+            print(h)
+            while out_i < self.n_funcs:
+                
+                print(self.funcs[out_i](h))
+                self.output.append(self.funcs[out_i](h))
                 out_i += 1
             self.output = tf.stack(self.output, axis=1)
             return self.output

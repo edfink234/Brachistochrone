@@ -10,6 +10,7 @@ from utils_dsr.regularization import l12_smooth
 
 
 funcs = functions.default_func
+print(funcs)
 x_dim = 1
 # Random data for a simple function
 x = np.random.rand(100, x_dim)

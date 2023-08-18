@@ -7,7 +7,6 @@ import tensorflow as tf
 import numpy as np
 import sympy as sp
 
-
 class BaseFunction:
     """Abstract class for primitive functions"""
     def __init__(self, norm=1):
@@ -77,6 +76,7 @@ class Pow(BaseFunction):
 
 class Sin(BaseFunction):
     def sp(self, x):
+#        print("sp.sin(x * 2*2*np.pi) / self.norm =",sp.sin(x * 2*2*np.pi) / self.norm)
         return sp.sin(x * 2*2*np.pi) / self.norm
 
 class Cos(BaseFunction):
@@ -145,6 +145,7 @@ class Product(BaseFunction2):
         super().__init__(norm=norm)
 
     def sp(self, x, y):
+#        print("x,y,x*y:",x,y,x*y)
         return x*y / self.norm
 
 
@@ -176,26 +177,30 @@ class BaseFunctionN:
 
     def tf(self, X):
         """Automatically convert sympy to TensorFlow"""
-        A = sp.symbols('A')
+        A = sp.symbols(''.join([f'A{i}' for i in range(self.n)]))
         return sp.utilities.lambdify([A], self.sp(A), 'tensorflow')(X)
 
-    def np(self, X):
+    def np(self, A):
         """Automatically convert sympy to numpy"""
-        A = sp.symbols('A')
+        A = sp.symbols(''.join([f'A{i}' for i in range(self.n)]))
         return sp.utilities.lambdify([A], self.sp(A), 'numpy')(X)
 
     def name(self, X):
         return str(self.sp)
 
 class Laplacian(BaseFunctionN):
-    def __init__(self, norm=0.1):
+    def __init__(self, norm=1, n=1):
         super().__init__(norm=norm)
+        self.n = n
 
     def sp(self, X):
-        return sp.vector.laplacian(x) / self.norm
+
+        return np.gradient(np.gradient(X)) / self.norm
     
     def np(self, X):
-        return np.gradient(np.gradient(X))
+#        print("called:",X)
+
+        return np.gradient(np.gradient(X)) / self.norm
 
 def count_N(funcs):
     i = 0
@@ -216,7 +221,7 @@ Square(),
 Sin(),
 Sigmoid(),
 Product(),
-#Laplacian()
+#Laplacian(11)
 ]
 
 #default_func = [
