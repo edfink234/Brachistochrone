@@ -1,5 +1,9 @@
 # Using reinforcement learning and symbolic regression to discover the Brachistochrone
 
+
+https://github.com/edfink234/Brachistochrone/assets/84761455/a94913b4-3598-4548-8880-c6d0042142ae
+
+
 Brachistochrone.py just tries to guess faster paths from point A to point B under the influence of only gravity, and updates the fastest path via a matplotlib animation.
 
 RL_Brachistrochrone.py implements a reinforcement learning environment with a neural network that tries to learn the best path under the the influence of only gravity, and also symbolic regression to produce candidate equations based on the coordinates of the best path found by the reinforcement learning agent. The paths are also shown in real-time via a matplotlib animation. An example output is shown in RL_Brachistrochrone.png
