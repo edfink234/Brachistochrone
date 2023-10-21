@@ -222,7 +222,6 @@ class SymbolicLayerL0(SymbolicLayer):
 
     def __call__(self, x, sample=True, reuse_u=False):
         """Multiply by weight matrix and apply activation units"""
-        print("SymbolicLayerL0 __call__: type(x) =",type(x))
         with tf.name_scope("symbolic_layer"):
             if self.W is None or self.qz_log_alpha is None:
                 self.build(x.shape[1])
@@ -253,10 +252,7 @@ class SymbolicLayerL0(SymbolicLayer):
                 in_i += 2
                 out_i += 1
             # Apply functions that take N inputs and produce 1 output
-            print(h)
             while out_i < self.n_funcs:
-                
-                print(self.funcs[out_i](h))
                 self.output.append(self.funcs[out_i](h))
                 out_i += 1
             self.output = tf.stack(self.output, axis=1)

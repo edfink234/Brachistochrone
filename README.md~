@@ -1,6 +1,5 @@
 # Using reinforcement learning and symbolic regression to discover the Brachistochrone
 
-The video below shows a Reinforcement Learning agent trying to find increasingly faster paths from (0,0) to (3,-10) via only the influence of gravity. The orange curve is the optimal solution (the Brachistochrone), which the agent has no idea about. The best path found by the agent is the blue curve.
 
 https://github.com/edfink234/Brachistochrone/assets/84761455/a94913b4-3598-4548-8880-c6d0042142ae
 
